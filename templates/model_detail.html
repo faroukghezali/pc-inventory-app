@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}{{ model.name }} – Inventaire{% endblock %}
+
+{% block content %}
+
+<!-- ── Back button ────────────────────────────────────────── -->
+<div class="page-fade">
+    <a href="{{ url_for('inventory.index') }}" class="btn-back">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 5l-7 7 7 7"/>
+        </svg>
+        Retour au tableau de bord
+    </a>
+
+    <!-- Model Header & Top Actions -->
+    <div class="card" style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1.25rem;margin-bottom:1.25rem;">
+        <div>
+            <h1 style="font-size:1.5rem;font-weight:700;color:var(--text-primary);margin:0;letter-spacing:-0.01em;">{{ model.name }}</h1>
+            <p class="text-muted" style="font-size:0.825rem;margin-top:0.25rem;">
+                Équipements enregistrés : <strong style="color:var(--text-secondary);font-weight:600;" id="filteredCount">{{ model.total_count }}</strong>
+            </p>
+        </div>
+
+        <!-- Top Row Action Buttons -->
+        <div style="display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
+            <!-- Modifier (operate on selected row only) -->
+            <button type="button" id="btnEditSelected" class="btn btn-toolbar-edit" disabled onclick="handleEditSelected()" title="Cochez une ligne pour la modifier">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+                Modifier
+            </button>
+
+            <!-- Supprimer (operate on selected row only) -->
+            <button type="button" id="btnDeleteSelected" class="btn btn-toolbar-delete" disabled onclick="handleDeleteSelected()" title="Cochez une ligne pour la supprimer">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+                Supprimer
+            </button>
+
+            <a href="{{ url_for('inventory.add_item') }}" class="btn btn-primary">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5v14M5 12h14"/>
+                </svg>
+                Ajouter un PC
+            </a>
+        </div>
+    </div>
+
+    <!-- ── Filter & Search Toolbar ────────────────────────────── -->
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:0.75rem;margin-bottom:1.25rem;">
+        <!-- Status Search Filter Dropdown -->
+        <div style="min-width:210px;">
+            <select id="statusFilter" class="status-filter-select" onchange="filterTable()" style="width:100%;">
+                <option value="">Tous les statuts</option>
+                <option value="En stock">En stock</option>
+                <option value="Affecter">Affecter</option>
+                <option value="Créé">Créé</option>
+                <option value="Utilisation hors domaine">Utilisation hors domaine</option>
+                <option value="Free">Free</option>
+            </select>
+        </div>
+
+        <!-- Quick Text Search -->
+        <div style="flex:1;min-width:240px;">
+            <input type="text" id="tableSearch" onkeyup="filterTable()" placeholder="Recherche rapide (FAN, SN, utilisateur, statut)…"
+                   class="search-input" style="width:100%;">
+        </div>
+    </div>
+</div>
+
+<!-- ── Flash messages ───────────────────────────────────────── -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for category, message in messages %}
+    <div class="alert alert-{{ category }}">{{ message }}</div>
+  {% endfor %}
+{% endwith %}
+
+<!-- ── Hidden form for Deletion ─────────────────────────────── -->
+<form id="deleteActionForm" method="POST" style="display:none;"></form>
+
+<!-- ── Inventory table ─────────────────────────────────────── -->
+<div class="card" style="padding:0;overflow:hidden;">
+    <div style="overflow-x:auto;">
+        <table id="inventoryTable" class="inv-table">
+            <thead>
+                <tr>
+                    <th style="width:44px;text-align:center;"></th>
+                    <th>FAN</th>
+                    <th>SN</th>
+                    <th>Statut</th>
+                    <th>Utilisateur</th>
+                    <th>Code User</th>
+                    <th>Licence</th>
+                    <th>Obs</th>
+                    <th style="text-align:center;">Détails</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in model.rows %}
+                {% set s = row['Statut'] %}
+                {% if   s == 'En stock'                 %}{% set rc='row-en-stock' %}{% set bc='badge-en-stock' %}
+                {% elif s == 'Utilisation hors domaine' %}{% set rc='row-hors'     %}{% set bc='badge-hors'     %}
+                {% elif s == 'Free'                     %}{% set rc='row-free'     %}{% set bc='badge-free'     %}
+                {% elif s == 'Affecter'                 %}{% set rc='row-affecter' %}{% set bc='badge-affecter' %}
+                {% elif s == 'Créé'                     %}{% set rc='row-cree'     %}{% set bc='badge-cree'     %}
+                {% else                                 %}{% set rc='row-default'  %}{% set bc='badge-default'  %}{% endif %}
+                <tr class="{{ rc }}" data-db-id="{{ row['db_id'] }}" data-statut="{{ row['Statut'] or '' }}">
+                    <!-- Checkbox for selection -->
+                    <td style="text-align:center;" onclick="event.stopPropagation();">
+                        <input type="checkbox" class="row-select-checkbox" data-db-id="{{ row['db_id'] }}"
+                               onchange="onRowCheckboxChange(this)" title="Sélectionner cet ordinateur">
+                    </td>
+                    <td class="font-mono" style="font-weight:600;">{{ row['FAN'] if row['FAN'] else '—' }}</td>
+                    <td class="font-mono">{{ row['SN'] if row['SN'] else '—' }}</td>
+                    <td>
+                        {% if row['Statut'] %}
+                        <span class="badge {{ bc }}">{{ row['Statut'] }}</span>
+                        {% else %}—{% endif %}
+                    </td>
+                    <td>{{ row["Nom d'utilisateur"] if row["Nom d'utilisateur"] else '—' }}</td>
+                    <td>{{ row['Code User'] if row['Code User'] else '—' }}</td>
+                    <td>{{ row['N° Licence'] if row['N° Licence'] else '—' }}</td>
+                    <td class="text-muted">{{ row['Obs'] if row['Obs'] else '—' }}</td>
+                    <td style="text-align:center;" onclick="event.stopPropagation();">
+                        {% if row['Statut'] in ['En stock', 'Utilisation hors domaine'] or row.get('has_details') %}
+                        <button type="button" class="btn-details" data-db-id="{{ row['db_id'] }}" onclick="openDetailsModal(this.dataset.dbId)" title="Afficher les caractéristiques techniques">
+                            📋 Détails
+                        </button>
+                        {% else %}
+                        <span class="text-muted" style="font-size:0.75rem;">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="9" style="padding:2.5rem 1rem;text-align:center;" class="text-muted">
+                        Aucun ordinateur trouvé pour ce modèle.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ── Technical Details Modal Popup ────────────────────────── -->
+<div id="detailsModal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-dialog">
+        <!-- Header -->
+        <div class="modal-header">
+            <div style="display:flex;align-items:center;gap:0.6rem;">
+                <h2 id="detailsModalTitle" style="font-size:1.1rem;font-weight:700;color:var(--text-primary);margin:0;">
+                    Détails Techniques
+                </h2>
+            </div>
+            <button type="button" class="modal-close-btn" onclick="closeDetailsModal()" title="Fermer (Échap)">
+                &times;
+            </button>
+        </div>
+
+        <!-- Body -->
+        <div id="detailsModalBody" class="modal-body">
+            <!-- Dynamically populated via table.js -->
+        </div>
+
+        <!-- Footer -->
+        <div style="padding:0.9rem 1.5rem;background:#f8fafc;border-top:1px solid var(--border);display:flex;justify-content:flex-end;">
+            <button type="button" class="btn btn-ghost" onclick="closeDetailsModal()">
+                Fermer
+            </button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/table.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,200 @@
+/* =============================================================
+   animations.css  –  Hover effects, transitions, light theme cards
+   ============================================================= */
+
+/* ── Model card elevation & smooth hover ─────────────────── */
+.model-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 1.6rem;
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+
+  /* smooth out all animatable properties */
+  transition:
+    transform       0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow      0.28s ease,
+    border-color    0.28s ease;
+  will-change: transform, box-shadow;
+}
+
+/* subtle shimmer sweep on hover */
+.model-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    transparent 35%,
+    rgba(37, 99, 235, 0.05) 50%,
+    transparent 65%
+  );
+  transform: translateX(-100%);
+  transition: transform 0.6s ease;
+  pointer-events: none;
+}
+
+.model-card:hover::before {
+  transform: translateX(100%);
+}
+
+.model-card:hover {
+  transform: translateY(-4px);
+  border-color: #3b82f6;
+  box-shadow:
+    0 0 0 1px rgba(59, 130, 246, 0.35),
+    0 0 20px rgba(59, 130, 246, 0.22),
+    0 12px 28px -4px rgba(37, 99, 235, 0.18),
+    0 4px 10px -2px rgba(15, 23, 42, 0.05);
+}
+
+.model-card:active {
+  transform: translateY(-1px);
+}
+
+/* ── Card icon (Static - no movement animation) ───────────── */
+.card-icon {
+  width: 2.75rem; height: 2.75rem;
+  border-radius: 0.75rem;
+  background: #eff6ff;
+  color: var(--blue);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.25rem;
+  margin-bottom: 1.1rem;
+  transition: background 0.25s ease;
+}
+.model-card:hover .card-icon {
+  background: #dbeafe;
+}
+
+/* ── Card arrow & footer ──────────────────────────────────── */
+.card-footer {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--blue);
+  transition: color 0.2s;
+}
+.card-footer .arrow {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.model-card:hover .card-footer { color: var(--blue-hover); }
+.model-card:hover .card-footer .arrow { transform: translateX(5px); }
+
+/* ── Page fade-in on load ─────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.page-fade {
+  animation: fadeUp 0.3s ease both;
+}
+
+/* stagger cards */
+.model-card:nth-child(1) { animation: fadeUp 0.3s 0.04s ease both; }
+.model-card:nth-child(2) { animation: fadeUp 0.3s 0.08s ease both; }
+.model-card:nth-child(3) { animation: fadeUp 0.3s 0.12s ease both; }
+.model-card:nth-child(4) { animation: fadeUp 0.3s 0.16s ease both; }
+.model-card:nth-child(5) { animation: fadeUp 0.3s 0.20s ease both; }
+.model-card:nth-child(6) { animation: fadeUp 0.3s 0.24s ease both; }
+
+/* ── Form field slide-in ──────────────────────────────────── */
+@keyframes fieldAppear {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.field-visible {
+  animation: fieldAppear 0.2s ease both;
+}
+
+/* ── Add button pulse ─────────────────────────────────────── */
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+}
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(255,255,255,0.15);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.btn-primary:hover::after { opacity: 1; }
+
+/* ── Table row smooth reveal ──────────────────────────────── */
+@keyframes rowFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+#inventoryTable tbody tr {
+  animation: rowFadeIn 0.25s ease both;
+}
+
+/* ── Futuristic AI Assistant & Assembly Animations ────────── */
+@keyframes aiPulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(2, 132, 199, 0.5), 0 0 15px rgba(37, 99, 235, 0.4); }
+  50% { transform: scale(1.05); box-shadow: 0 0 0 8px rgba(2, 132, 199, 0), 0 0 25px rgba(37, 99, 235, 0.6); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(2, 132, 199, 0), 0 0 15px rgba(37, 99, 235, 0.4); }
+}
+
+@keyframes spinHud {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes spinHudReverse {
+  0% { transform: rotate(360deg); }
+  100% { transform: rotate(0deg); }
+}
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(1000%); }
+}
+
+@keyframes chipTransfer {
+  0% { transform: translateX(0) scale(1); opacity: 0.9; }
+  50% { transform: translateX(35px) scale(1.15); opacity: 1; filter: drop-shadow(0 0 10px #0284c7); }
+  100% { transform: translateX(70px) scale(1); opacity: 0.9; }
+}
+
+@keyframes glowSuccess {
+  0% { box-shadow: 0 0 5px rgba(16, 185, 129, 0.4); }
+  50% { box-shadow: 0 0 25px rgba(16, 185, 129, 0.8), 0 0 45px rgba(5, 150, 105, 0.4); }
+  100% { box-shadow: 0 0 5px rgba(16, 185, 129, 0.4); }
+}
+
+.ai-avatar-core {
+  animation: aiPulse 2.5s infinite ease-in-out;
+}
+
+.hud-ring-outer {
+  animation: spinHud 8s linear infinite;
+}
+
+.hud-ring-inner {
+  animation: spinHudReverse 5s linear infinite;
+}
+
+.chip-animated {
+  animation: chipTransfer 1.2s infinite ease-in-out alternate;
+}
+
+.success-glow-card {
+  animation: glowSuccess 2s infinite ease-in-out;
+}

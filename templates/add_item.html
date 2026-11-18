@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}Ajouter un Ordinateur – Inventaire{% endblock %}
+
+{% block content %}
+<div class="page-fade" style="max-width:38rem;margin:0 auto;">
+
+    <!-- Back button -->
+    <a href="{{ url_for('inventory.index') }}" class="btn-back">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 5l-7 7 7 7"/>
+        </svg>
+        Retour au tableau de bord
+    </a>
+
+    <div class="card">
+        <div style="margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid var(--border);">
+            <h1 style="font-size:1.4rem;font-weight:700;color:var(--text-primary);margin:0;letter-spacing:-0.01em;">Ajouter un Nouvel Ordinateur</h1>
+            <p class="text-muted" style="font-size:0.825rem;margin-top:0.3rem;">
+                Sélectionnez le statut pour afficher les champs correspondants.
+            </p>
+        </div>
+
+        <!-- Flash messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endwith %}
+
+        <form method="POST" id="addForm" style="display:flex;flex-direction:column;gap:1.1rem;">
+
+            <!-- ① STATUT — always first -->
+            <div>
+                <label class="form-label">
+                    Statut <span class="required">*</span>
+                </label>
+                <select name="statut" id="statutSelect" required class="form-select">
+                    <option value="" disabled {% if not form_data.get('statut') %}selected{% endif %}>
+                        — Choisir un statut —
+                    </option>
+                    {% for opt in ['En stock','Affecter','Créé','Free','Utilisation hors domaine'] %}
+                    <option value="{{ opt }}"
+                        {% if form_data.get('statut') == opt %}selected{% endif %}>
+                        {{ opt }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- ② MODÈLE -->
+            <div id="field-model" class="hidden">
+                <label class="form-label">Modèle (ex: HP 6-GI1-14) <span class="required">*</span></label>
+                <input type="text" name="model_name" placeholder="Entrez le modèle"
+                       value="{{ form_data.get('model_name', '') }}"
+                       class="form-input">
+            </div>
+
+            <!-- ③ QUANTITÉ — Free only -->
+            <div id="field-quantity" class="hidden">
+                <label class="form-label">Quantité <span class="required">*</span></label>
+                <input type="number" name="quantity" min="1" max="500"
+                       placeholder="Nombre d'ordinateurs à créer"
+                       value="{{ form_data.get('quantity', '1') }}"
+                       class="form-input">
+                <p class="text-muted" style="font-size:0.75rem;margin-top:0.35rem;">
+                    Chaque ordinateur sera enregistré comme un enregistrement individuel.
+                </p>
+            </div>
+
+            <!-- ④ FAN -->
+            <div id="field-fan" class="hidden">
+                <label class="form-label">Numéro FAN</label>
+                <input type="text" name="fan" placeholder="Numéro FAN (unique)"
+                       value="{{ form_data.get('fan', '') }}"
+                       class="form-input">
+            </div>
+
+            <!-- ⑤ SN -->
+            <div id="field-sn" class="hidden">
+                <label class="form-label">Numéro de Série (SN)</label>
+                <input type="text" name="sn" placeholder="Serial Number"
+                       value="{{ form_data.get('sn', '') }}"
+                       class="form-input">
+            </div>
+
+            <!-- ⚙️ HARDWARE & SYSTEM INFORMATION (En stock & Utilisation hors domaine) -->
+            <div id="field-hw-details" class="hidden" style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-input);padding:1.25rem;">
+                <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:1rem;padding-bottom:0.65rem;border-bottom:1px solid var(--border);">
+                    <span style="font-size:1.2rem;">⚙️</span>
+                    <div>
+                        <h3 style="font-size:0.9rem;font-weight:700;color:var(--text-primary);margin:0;">Informations Matérielles & Système</h3>
+                        <p class="text-muted" style="font-size:0.75rem;margin:0;">Vérification technique de l'équipement</p>
+                    </div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:0.9rem;margin-bottom:1.15rem;">
+                    <!-- Disque dur -->
+                    <div>
+                        <label class="form-label">Disque dur</label>
+                        <select name="disque_dur" class="form-select">
+                            <option value="" disabled {% if not form_data.get('disque_dur') %}selected{% endif %}>— Choisir —</option>
+                            <option value="Oui" {% if form_data.get('disque_dur') == 'Oui' %}selected{% endif %}>Oui</option>
+                            <option value="Non" {% if form_data.get('disque_dur') == 'Non' %}selected{% endif %}>Non</option>
+                        </select>
+                    </div>
+
+                    <!-- État du clavier -->
+                    <div>
+                        <label class="form-label">État du clavier</label>
+                        <select name="etat_clavier" class="form-select">
+                            <option value="" disabled {% if not form_data.get('etat_clavier') %}selected{% endif %}>— Choisir —</option>
+                            <option value="Oui" {% if form_data.get('etat_clavier') == 'Oui' %}selected{% endif %}>Oui</option>
+                            <option value="Non" {% if form_data.get('etat_clavier') == 'Non' %}selected{% endif %}>Non</option>
+                        </select>
+                    </div>
+
+                    <!-- Système opérateur -->
+                    <div>
+                        <label class="form-label">Système opérateur</label>
+                        <select name="systeme_operateur" class="form-select">
+                            <option value="" disabled {% if not form_data.get('systeme_operateur') %}selected{% endif %}>— Choisir —</option>
+                            <option value="Oui" {% if form_data.get('systeme_operateur') == 'Oui' %}selected{% endif %}>Oui</option>
+                            <option value="Non" {% if form_data.get('systeme_operateur') == 'Non' %}selected{% endif %}>Non</option>
+                        </select>
+                    </div>
+
+                    <!-- État de l'écran -->
+                    <div>
+                        <label class="form-label">État de l'écran</label>
+                        <select name="etat_ecran" class="form-select">
+                            <option value="" disabled {% if not form_data.get('etat_ecran') %}selected{% endif %}>— Choisir —</option>
+                            <option value="Oui" {% if form_data.get('etat_ecran') == 'Oui' %}selected{% endif %}>Oui</option>
+                            <option value="Non" {% if form_data.get('etat_ecran') == 'Non' %}selected{% endif %}>Non</option>
+                        </select>
+                    </div>
+
+                    <!-- La RAM -->
+                    <div>
+                        <label class="form-label">La RAM</label>
+                        <select name="ram" class="form-select">
+                            <option value="" disabled {% if not form_data.get('ram') %}selected{% endif %}>— Choisir —</option>
+                            <option value="Oui" {% if form_data.get('ram') == 'Oui' %}selected{% endif %}>Oui</option>
+                            <option value="Non" {% if form_data.get('ram') == 'Non' %}selected{% endif %}>Non</option>
+                        </select>
+                    </div>
+
+                    <!-- Ports USB -->
+                    <div>
+                        <label class="form-label">Ports USB</label>
+                        <select name="ports_usb" class="form-select">
+                            <option value="" disabled {% if not form_data.get('ports_usb') %}selected{% endif %}>— Choisir —</option>
+                            <option value="Toutes" {% if form_data.get('ports_usb') == 'Toutes' %}selected{% endif %}>Toutes</option>
+                            <option value="1" {% if form_data.get('ports_usb') == '1' %}selected{% endif %}>1</option>
+                            <option value="2" {% if form_data.get('ports_usb') == '2' %}selected{% endif %}>2</option>
+                            <option value="3" {% if form_data.get('ports_usb') == '3' %}selected{% endif %}>3</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Batterie (slider) -->
+                <div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+                        <label class="form-label" style="margin:0;">Batterie</label>
+                        <span id="batterie-value" style="font-size:0.875rem;font-weight:700;color:#16a34a;">80% — ✅ Good</span>
+                    </div>
+                    <div style="background:#ffffff;border:1px solid var(--border-strong);border-radius:var(--radius-input);padding:0.8rem 1rem;">
+                        <input type="range" id="batterie-slider" name="batterie" min="0" max="100"
+                               value="{{ form_data.get('batterie', '80') }}"
+                               class="battery-slider" style="width:100%;cursor:pointer;">
+                        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-dim);margin-top:0.45rem;">
+                            <span>0% (Faible)</span>
+                            <span style="color:#d97706;font-weight:600;">50% (Seuil)</span>
+                            <span style="color:#16a34a;font-weight:600;">100% (Bon)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ⑥ NOM UTILISATEUR -->
+            <div id="field-username" class="hidden">
+                <label class="form-label">Nom d'utilisateur</label>
+                <input type="text" name="username" placeholder="Nom de l'employé"
+                       value="{{ form_data.get('username', '') }}"
+                       class="form-input">
+            </div>
+
+            <!-- ⑦ CODE USER -->
+            <div id="field-code-user" class="hidden">
+                <label class="form-label">Code User</label>
+                <input type="text" name="code_user" placeholder="Code utilisateur"
+                       value="{{ form_data.get('code_user', '') }}"
+                       class="form-input">
+            </div>
+
+            <!-- ⑧ LICENCE -->
+            <div id="field-licence" class="hidden">
+                <label class="form-label">Numéro de Licence</label>
+                <input type="text" name="license_num" placeholder="Numéro de licence"
+                       value="{{ form_data.get('license_num', '') }}"
+                       class="form-input">
+            </div>
+
+            <!-- ⑨ OBS -->
+            <div id="field-obs" class="hidden">
+                <label class="form-label">Observations</label>
+                <input type="text" name="obs" placeholder="Remarques ou observations"
+                       value="{{ form_data.get('obs', '') }}"
+                       class="form-input">
+            </div>
+
+            <!-- Actions -->
+            <hr class="divider">
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:0.75rem;">
+                <a href="{{ url_for('inventory.index') }}" class="btn btn-ghost">Annuler</a>
+                <button type="submit" class="btn btn-primary">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                         fill="none" stroke="currentColor" stroke-width="2.5"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                    </svg>
+                    Enregistrer
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/form.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Préparer un PC – Ordinateurs En Stock{% endblock %}
+
+{% block content %}
+
+<!-- ── Back button ────────────────────────────────────────── -->
+<div class="page-fade">
+    <a href="{{ url_for('inventory.index') }}" class="btn-back">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 5l-7 7 7 7"/>
+        </svg>
+        Retour au tableau de bord
+    </a>
+
+    <!-- Header & Top Actions -->
+    <div class="card" style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1.25rem;margin-bottom:1.25rem;">
+        <div>
+            <div style="display:flex;align-items:center;gap:0.6rem;">
+                <span style="font-size:1.5rem;">🛠️</span>
+                <h1 style="font-size:1.5rem;font-weight:700;color:var(--text-primary);margin:0;letter-spacing:-0.01em;">
+                    Préparer un PC — En Stock
+                </h1>
+            </div>
+            <p class="text-muted" style="font-size:0.85rem;margin-top:0.35rem;">
+                Reconditionnement intelligent et transfert de pièces détachées entre ordinateurs du même modèle.
+            </p>
+        </div>
+
+        <!-- Top Row Action Buttons -->
+        <div style="display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
+            <!-- Intelligent AI Preparation Button -->
+            <button type="button" id="btnPrepareSelected" class="btn btn-prepare" disabled onclick="handleStartPreparation()" title="Cochez un PC pour lancer la préparation intelligente">
+                <span style="font-size:1.1rem;">🤖</span>
+                Préparer
+            </button>
+
+            <!-- Modifier -->
+            <button type="button" id="btnEditSelected" class="btn btn-toolbar-edit" disabled onclick="handleEditSelected()" title="Cochez une ligne pour la modifier">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+                Modifier
+            </button>
+
+            <!-- Supprimer -->
+            <button type="button" id="btnDeleteSelected" class="btn btn-toolbar-delete" disabled onclick="handleDeleteSelected()" title="Cochez une ligne pour la supprimer">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="2.5"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+                Supprimer
+            </button>
+
+            <div class="stat-badge">
+                <span class="label">Disponibles</span>
+                <span class="value" id="filteredCount">{{ total_stock }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Filter & Search Toolbar ────────────────────────────── -->
+    <div style="margin-bottom:1.25rem;">
+        <input type="text" id="tableSearch" onkeyup="filterTable()" placeholder="Recherche rapide (Modèle, FAN, SN)…"
+               class="search-input" style="width:100%;">
+    </div>
+</div>
+
+<!-- ── Flash messages ───────────────────────────────────────── -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for category, message in messages %}
+    <div class="alert alert-{{ category }}">{{ message }}</div>
+  {% endfor %}
+{% endwith %}
+
+<!-- ── Hidden form for Deletion ─────────────────────────────── -->
+<form id="deleteActionForm" method="POST" style="display:none;"></form>
+
+<!-- ── Inventory table (En stock only) ───────────────────────── -->
+<div class="card" style="padding:0;overflow:hidden;">
+    <div style="overflow-x:auto;">
+        <table id="inventoryTable" class="inv-table">
+            <thead>
+                <tr>
+                    <th style="width:44px;text-align:center;"></th>
+                    <th>Modèle</th>
+                    <th>FAN</th>
+                    <th>SN (Numéro de Série)</th>
+                    <th>Statut</th>
+                    <th style="text-align:center;">Détails</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in items %}
+                <tr class="row-en-stock" data-db-id="{{ row['db_id'] }}" data-statut="En stock">
+                    <!-- Checkbox for selection -->
+                    <td style="text-align:center;" onclick="event.stopPropagation();">
+                        <input type="checkbox" class="row-select-checkbox" data-db-id="{{ row['db_id'] }}"
+                               onchange="onRowCheckboxChange(this)" title="Sélectionner cet ordinateur">
+                    </td>
+                    <td>
+                        <a href="{{ url_for('inventory.model_detail', slug=row['model_slug']) }}" style="font-weight:600;color:var(--blue);" title="Voir tous les ordinateurs de ce modèle">
+                            {{ row['model_name'] }}
+                        </a>
+                    </td>
+                    <td class="font-mono" style="font-weight:600;">{{ row['FAN'] if row['FAN'] else '—' }}</td>
+                    <td class="font-mono" style="font-weight:600;color:var(--text-primary);">{{ row['SN'] if row['SN'] else '—' }}</td>
+                    <td>
+                        <span class="badge badge-en-stock">{{ row['Statut'] }}</span>
+                    </td>
+                    <td style="text-align:center;" onclick="event.stopPropagation();">
+                        <button type="button" class="btn-details" data-db-id="{{ row['db_id'] }}" onclick="openDetailsModal(this.dataset.dbId)" title="Afficher les caractéristiques techniques, batterie et observations">
+                            📋 Détails
+                        </button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" style="padding:3.5rem 1rem;text-align:center;" class="text-muted">
+                        <p style="font-size:1.05rem;margin:0 0 0.5rem;font-weight:600;">🎉 Aucun ordinateur en stock actuellement.</p>
+                        <p style="font-size:0.85rem;margin:0;">Tous les équipements sont déjà préparés ou affectés.</p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ── Technical Details Modal Popup ────────────────────────── -->
+<div id="detailsModal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-dialog">
+        <div class="modal-header">
+            <div style="display:flex;align-items:center;gap:0.6rem;">
+                <h2 id="detailsModalTitle" style="font-size:1.1rem;font-weight:700;color:var(--text-primary);margin:0;">
+                    Détails Techniques
+                </h2>
+            </div>
+            <button type="button" class="modal-close-btn" onclick="closeDetailsModal()" title="Fermer (Échap)">
+                &times;
+            </button>
+        </div>
+        <div id="detailsModalBody" class="modal-body"></div>
+        <div style="padding:0.9rem 1.5rem;background:#f8fafc;border-top:1px solid var(--border);display:flex;justify-content:flex-end;">
+            <button type="button" class="btn btn-ghost" onclick="closeDetailsModal()">Fermer</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Futuristic AI Preparation Assistant Modal ────────────── -->
+<div id="aiAssistantModal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-dialog ai-modal-dialog">
+        <!-- AI Futuristic Header -->
+        <div class="ai-header-bar">
+            <div style="display:flex;align-items:center;gap:0.85rem;">
+                <div class="ai-core-badge ai-avatar-core">
+                    🤖
+                </div>
+                <div>
+                    <h3 style="font-size:1.15rem;font-weight:700;color:#ffffff;margin:0;letter-spacing:-0.01em;">
+                        Assistant IA de Préparation PC
+                    </h3>
+                    <span style="font-size:0.75rem;color:#7dd3fc;display:block;margin-top:0.15rem;">
+                        Système Intelligent de Reconditionnement & Échange de Composants
+                    </span>
+                </div>
+            </div>
+            <button type="button" class="modal-close-btn" onclick="closeAIModal()" style="color:#94a3b8;" title="Fermer (Échap)">
+                &times;
+            </button>
+        </div>
+
+        <!-- AI Assistant Body (Analysis / Animation / Results) -->
+        <div id="aiModalBody" class="modal-body" style="padding:1.5rem;">
+            <!-- Dynamically populated via preparer.js -->
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/table.js') }}"></script>
+<script src="{{ url_for('static', filename='js/preparer.js') }}"></script>
+{% endblock %}
