@@ -3,6 +3,7 @@
  */
 
 let selectedDbId = null;
+const selectedDbIds = new Set();
 
 // ── Search & Status Filter ──────────────────────────────────────────────────
 function filterTable() {
@@ -32,25 +33,10 @@ function filterTable() {
 
 // ── Row Selection (Checkbox & Row Click) ────────────────────────────────────
 function onRowCheckboxChange(checkbox) {
-  const allCheckboxes = document.querySelectorAll('.row-select-checkbox');
-  const allRows       = document.querySelectorAll('#inventoryTable tbody tr');
-
-  if (checkbox.checked) {
-    // Uncheck other checkboxes (single row operation)
-    allCheckboxes.forEach(cb => {
-      if (cb !== checkbox) cb.checked = false;
-    });
-    allRows.forEach(r => r.classList.remove('row-selected'));
-
-    const row = checkbox.closest('tr');
-    if (row) row.classList.add('row-selected');
-    selectedDbId = checkbox.dataset.dbId;
-  } else {
-    const row = checkbox.closest('tr');
-    if (row) row.classList.remove('row-selected');
-    selectedDbId = null;
-  }
-
+  const row = checkbox.closest('tr');
+  if (checkbox.checked) { selectedDbIds.add(checkbox.dataset.dbId); row?.classList.add('row-selected'); }
+  else { selectedDbIds.delete(checkbox.dataset.dbId); row?.classList.remove('row-selected'); }
+  selectedDbId = selectedDbIds.size === 1 ? [...selectedDbIds][0] : null;
   updateActionButtonsState();
 }
 
@@ -65,10 +51,10 @@ function updateActionButtonsState() {
   const btnEdit   = document.getElementById('btnEditSelected');
   const btnDelete = document.getElementById('btnDeleteSelected');
 
-  const hasSelection = !!selectedDbId;
+  const hasSelection = selectedDbIds.size > 0;
 
   if (btnEdit) {
-    btnEdit.disabled = !hasSelection;
+    btnEdit.disabled = selectedDbIds.size !== 1;
     btnEdit.title = hasSelection
       ? 'Modifier l\'équipement sélectionné'
       : 'Veuillez sélectionner un équipement dans le tableau';
@@ -90,24 +76,12 @@ function handleEditSelected() {
 }
 
 function handleDeleteSelected() {
-  if (!selectedDbId) {
-    alert('Veuillez cocher la case d\'un équipement pour le supprimer.');
-    return;
-  }
-
-  if (confirm('Êtes-vous sûr de vouloir supprimer cet équipement sélectionné ? Cette action est irréversible.')) {
+  if (!selectedDbIds.size) return;
+  if (confirm(`Supprimer ${selectedDbIds.size} ordinateur(s) s?lectionn?(s) ? Cette action est irr?versible.`)) {
     const form = document.getElementById('deleteActionForm');
-    if (form) {
-      form.action = `/delete/${selectedDbId}`;
-      form.submit();
-    } else {
-      // Fallback: create dynamic form
-      const f = document.createElement('form');
-      f.method = 'POST';
-      f.action = `/delete/${selectedDbId}`;
-      document.body.appendChild(f);
-      f.submit();
-    }
+    form.querySelectorAll('input[name="ids"]').forEach(input => input.remove());
+    selectedDbIds.forEach(id => { const input = document.createElement('input'); input.type = 'hidden'; input.name = 'ids'; input.value = id; form.appendChild(input); });
+    form.submit();
   }
 }
 
@@ -131,6 +105,7 @@ function renderBatteryIndicator(val) {
     return `<span class="indicator-neutral">— Non renseigné</span>`;
   }
   const num = parseInt(val, 10);
+  if (num === 0) return `<span class="indicator-badge indicator-bad">? Batterie absente</span>`;
   if (isNaN(num)) return `<span class="indicator-neutral">${val}</span>`;
 
   // Condition: Battery below 50% -> ❌ Low battery; 50-100% -> ✅ Good
@@ -234,6 +209,9 @@ async function openDetailsModal(dbId) {
           <span class="tech-card-label">📺 État de l'écran</span>
           <div>${renderBoolIndicator(data.etat_ecran)}</div>
         </div>
+
+        <!-- Pav? tactile -->
+        <div class="tech-card"><span class="tech-card-label">Pav? tactile</span><div>${renderBoolIndicator(data.pave_tactile)}</div></div>
 
         <!-- La RAM -->
         <div class="tech-card">

@@ -3,6 +3,7 @@ Database layer — connection, initialisation, and all data-access helpers.
 All SQL lives here; routes never touch sqlite3 directly.
 """
 import sqlite3
+from datetime import datetime
 from flask import current_app, g
 
 
@@ -54,7 +55,8 @@ def init_db():
             etat_ecran         TEXT,
             batterie           INTEGER,
             ram                TEXT,
-            ports_usb          TEXT
+            ports_usb          TEXT,
+            pave_tactile       TEXT
         )
     ''')
 
@@ -68,6 +70,7 @@ def init_db():
         ('batterie',           'INTEGER'),
         ('ram',                'TEXT'),
         ('ports_usb',          'TEXT'),
+        ('pave_tactile',       'TEXT'),
     ]
     for col, typ in new_cols:
         if col not in existing:
@@ -126,6 +129,29 @@ def get_item_by_id(db_id):
     return dict(row) if row else None
 
 
+def get_all_inventory():
+    """Return all inventory records sorted by model_name, id."""
+    db = get_db()
+    rows = db.execute('''
+        SELECT * FROM inventory
+        ORDER BY model_name COLLATE NOCASE ASC, id ASC
+    ''').fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_status_summary():
+    """Return count per status and total general."""
+    db = get_db()
+    rows = db.execute('''
+        SELECT statut, COUNT(*) AS count
+        FROM inventory
+        GROUP BY statut
+    ''').fetchall()
+    counts = {r['statut']: r['count'] for r in rows if r['statut']}
+    total = db.execute('SELECT COUNT(*) FROM inventory').fetchone()[0]
+    return counts, total
+
+
 def fan_exists(fan, exclude_id=None):
     """Return True if the given FAN is already in the database (excluding exclude_id)."""
     db = get_db()
@@ -141,23 +167,46 @@ def fan_exists(fan, exclude_id=None):
 def insert_item(model_slug, model_name, fan, sn, statut,
                 username, code_user, license_num, obs,
                 disque_dur=None, etat_clavier=None, systeme_operateur=None,
-                etat_ecran=None, batterie=None, ram=None, ports_usb=None):
+                etat_ecran=None, batterie=None, ram=None, ports_usb=None,
+                pave_tactile=None):
+    # Automatic Component Status: Créé or Free PCs are new/fully functional
+    if statut in ('Créé', 'Free'):
+        disque_dur = 'Oui'
+        ram = 'Oui'
+        etat_clavier = 'Oui'
+        etat_ecran = 'Oui'
+        systeme_operateur = 'Oui'
+        pave_tactile = 'Oui'
+        ports_usb = 'Toutes'
+        batterie = 100
+
     db = get_db()
     db.execute('''
         INSERT INTO inventory
             (model_slug, model_name, fan, sn, statut, username, code_user, license_num, obs,
-             disque_dur, etat_clavier, systeme_operateur, etat_ecran, batterie, ram, ports_usb)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             disque_dur, etat_clavier, systeme_operateur, etat_ecran, batterie, ram, ports_usb, pave_tactile)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (model_slug, model_name, fan, sn, statut, username, code_user, license_num, obs,
-          disque_dur, etat_clavier, systeme_operateur, etat_ecran, batterie, ram, ports_usb))
+          disque_dur, etat_clavier, systeme_operateur, etat_ecran, batterie, ram, ports_usb, pave_tactile))
     db.commit()
 
 
 def update_item(db_id, model_slug, model_name, fan, sn, statut,
                 username, code_user, license_num, obs,
                 disque_dur=None, etat_clavier=None, systeme_operateur=None,
-                etat_ecran=None, batterie=None, ram=None, ports_usb=None):
+                etat_ecran=None, batterie=None, ram=None, ports_usb=None,
+                pave_tactile=None):
     """Update all information for an existing computer record."""
+    if statut in ('Créé', 'Free'):
+        disque_dur = 'Oui'
+        ram = 'Oui'
+        etat_clavier = 'Oui'
+        etat_ecran = 'Oui'
+        systeme_operateur = 'Oui'
+        pave_tactile = 'Oui'
+        ports_usb = 'Toutes'
+        batterie = 100
+
     db = get_db()
     db.execute('''
         UPDATE inventory SET
@@ -176,32 +225,68 @@ def update_item(db_id, model_slug, model_name, fan, sn, statut,
             etat_ecran = ?,
             batterie = ?,
             ram = ?,
-            ports_usb = ?
+            ports_usb = ?,
+            pave_tactile = ?
         WHERE id = ?
     ''', (model_slug, model_name, fan, sn, statut, username, code_user, license_num, obs,
-          disque_dur, etat_clavier, systeme_operateur, etat_ecran, batterie, ram, ports_usb, db_id))
+          disque_dur, etat_clavier, systeme_operateur, etat_ecran, batterie, ram, ports_usb, pave_tactile, db_id))
     db.commit()
 
 
-def bulk_insert_free(model_slug, model_name, statut, quantity):
-    """Insert `quantity` identical skeleton rows (Free status)."""
+def bulk_insert_free(model_slug, model_name, statut, quantity, sn=None):
+    """Insert `quantity` identical skeleton rows (Free status with functional components)."""
     db = get_db()
-    for _ in range(quantity):
+    for index in range(quantity):
         db.execute('''
             INSERT INTO inventory
-                (model_slug, model_name, fan, sn, statut, username, code_user, license_num, obs)
-            VALUES (?, ?, NULL, NULL, ?, NULL, NULL, NULL, NULL)
+                (model_slug, model_name, fan, sn, statut, username, code_user, license_num, obs,
+                 disque_dur, etat_clavier, systeme_operateur, etat_ecran, batterie, ram, ports_usb, pave_tactile)
+            VALUES (?, ?, NULL, NULL, ?, NULL, NULL, NULL, NULL,
+                    'Oui', 'Oui', 'Oui', 'Oui', 100, 'Oui', 'Toutes', 'Oui')
         ''', (model_slug, model_name, statut))
+        if index == 0 and sn:
+            db.execute('UPDATE inventory SET sn = ? WHERE id = last_insert_rowid()', (sn,))
     db.commit()
 
 
-from datetime import datetime
+def delete_item_by_id(db_id):
+    """Delete one row; returns the model_slug for redirect."""
+    db = get_db()
+    row = db.execute(
+        'SELECT model_slug FROM inventory WHERE id = ?', (db_id,)
+    ).fetchone()
+    slug = row['model_slug'] if row else None
+    db.execute('DELETE FROM inventory WHERE id = ?', (db_id,))
+    db.commit()
+    return slug
+
+
+def delete_items_batch(id_list):
+    """Delete multiple rows by their IDs; returns list of affected model_slugs."""
+    if not id_list:
+        return []
+    db = get_db()
+    placeholders = ', '.join('?' for _ in id_list)
+    rows = db.execute(
+        f'SELECT DISTINCT model_slug FROM inventory WHERE id IN ({placeholders})',
+        id_list
+    ).fetchall()
+    slugs = [r['model_slug'] for r in rows if r['model_slug']]
+    db.execute(f'DELETE FROM inventory WHERE id IN ({placeholders})', id_list)
+    db.commit()
+    return slugs
+
+
+# ---------------------------------------------------------------------------
+# Component labels & AI preparation engine
+# ---------------------------------------------------------------------------
 
 COMPONENT_LABELS = {
     'disque_dur': 'Disque dur',
     'ram': 'La RAM',
     'etat_clavier': 'État du clavier',
     'etat_ecran': 'État de l\'écran',
+    'pave_tactile': 'Pavé tactile',
     'systeme_operateur': 'Système opérateur',
     'ports_usb': 'Ports USB',
     'batterie': 'Batterie',
@@ -277,7 +362,7 @@ def execute_component_transfers(target_id, transfers):
         # Determine values to swap
         if comp_key == 'batterie':
             new_target_val = int(donor_val)
-            new_donor_val = int(target['batterie']) if target['batterie'] is not None else 20
+            new_donor_val = int(target['batterie']) if target['batterie'] is not None else 0
         elif comp_key == 'ports_usb':
             new_target_val = donor_val
             new_donor_val = 'Non'
@@ -336,15 +421,3 @@ def execute_component_transfers(target_id, transfers):
         'target': updated_target,
         'transferred_components': transferred_log
     }
-
-
-def delete_item_by_id(db_id):
-    """Delete one row; returns the model_slug for redirect."""
-    db = get_db()
-    row = db.execute(
-        'SELECT model_slug FROM inventory WHERE id = ?', (db_id,)
-    ).fetchone()
-    slug = row['model_slug'] if row else None
-    db.execute('DELETE FROM inventory WHERE id = ?', (db_id,))
-    db.commit()
-    return slug

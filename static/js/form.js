@@ -7,8 +7,8 @@ const FIELD_RULES = {
   '':                         [],
   'En stock':                 ['model', 'fan', 'sn', 'hw-details', 'obs'],
   'Affecter':                 ['model', 'fan', 'sn', 'username', 'code-user', 'licence', 'obs'],
-  'Créé':                     ['model', 'username', 'code-user'],
-  'Free':                     ['model', 'quantity'],
+  'Créé':                     ['model', 'fan', 'username', 'code-user'],
+  'Free':                     ['model', 'quantity', 'sn'],
   'Utilisation hors domaine': ['model', 'fan', 'sn', 'hw-details', 'obs'],
 };
 
@@ -51,6 +51,12 @@ function initBatterySlider() {
 
   function update() {
     const val = parseInt(slider.value, 10) || 0;
+    if (val === 0) {
+      label.textContent = '❌ Batterie absente';
+      label.style.color = '#dc2626';
+      slider.style.accentColor = '#dc2626';
+      return;
+    }
     const isGood = val >= 50;
     const colour = isGood ? '#22c55e' : '#ef4444';
     const tag    = isGood ? '✅ Good' : '❌ Low battery';

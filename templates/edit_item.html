@@ -144,6 +144,10 @@
                         </select>
                     </div>
 
+                    <div>
+                        <label class="form-label">Pavé tactile</label>
+                        <select name="pave_tactile" class="form-select"><option value="">— Choisir —</option><option value="Oui" {% if item.get('pave_tactile') == 'Oui' %}selected{% endif %}>Oui</option><option value="Non" {% if item.get('pave_tactile') == 'Non' %}selected{% endif %}>Non</option></select>
+                    </div>
                     <!-- Ports USB -->
                     <div>
                         <label class="form-label">Ports USB</label>

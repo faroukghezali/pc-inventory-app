@@ -55,6 +55,7 @@
                 </svg>
                 Ajouter un PC
             </a>
+            <a href="{{ url_for('inventory.export_excel') }}" class="btn btn-excel">Excel</a>
         </div>
     </div>
 
@@ -88,7 +89,7 @@
 {% endwith %}
 
 <!-- ── Hidden form for Deletion ─────────────────────────────── -->
-<form id="deleteActionForm" method="POST" style="display:none;"></form>
+<form id="deleteActionForm" method="POST" action="{{ url_for('inventory.delete_batch') }}" style="display:none;"></form>
 
 <!-- ── Inventory table ─────────────────────────────────────── -->
 <div class="card" style="padding:0;overflow:hidden;">
@@ -103,7 +104,6 @@
                     <th>Utilisateur</th>
                     <th>Code User</th>
                     <th>Licence</th>
-                    <th>Obs</th>
                     <th style="text-align:center;">Détails</th>
                 </tr>
             </thead>
@@ -132,7 +132,6 @@
                     <td>{{ row["Nom d'utilisateur"] if row["Nom d'utilisateur"] else '—' }}</td>
                     <td>{{ row['Code User'] if row['Code User'] else '—' }}</td>
                     <td>{{ row['N° Licence'] if row['N° Licence'] else '—' }}</td>
-                    <td class="text-muted">{{ row['Obs'] if row['Obs'] else '—' }}</td>
                     <td style="text-align:center;" onclick="event.stopPropagation();">
                         {% if row['Statut'] in ['En stock', 'Utilisation hors domaine'] or row.get('has_details') %}
                         <button type="button" class="btn-details" data-db-id="{{ row['db_id'] }}" onclick="openDetailsModal(this.dataset.dbId)" title="Afficher les caractéristiques techniques">
@@ -145,7 +144,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="9" style="padding:2.5rem 1rem;text-align:center;" class="text-muted">
+                    <td colspan="8" style="padding:2.5rem 1rem;text-align:center;" class="text-muted">
                         Aucun ordinateur trouvé pour ce modèle.
                     </td>
                 </tr>

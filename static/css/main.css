@@ -746,3 +746,17 @@ main {
   border-color: #bbf7d0;
   color: #15803d;
 }
+.btn-excel {
+    background: #15803d;
+    color: #fff;
+    border: 1px solid #22c55e;
+    transition: box-shadow 180ms ease, background-color 180ms ease, transform 180ms ease;
+}
+
+.btn-excel:hover,
+.btn-excel:focus-visible {
+    background: #16a34a;
+    color: #fff;
+    box-shadow: 0 0 8px #39ff14, 0 0 18px #39ff14, 0 0 34px rgb(57 255 20 / 70%);
+    transform: translateY(-1px);
+}

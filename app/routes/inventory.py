@@ -3,14 +3,19 @@ Inventory routes — all HTTP endpoints for the application.
 No SQL here: delegate everything to app.models.database.
 """
 from flask import (
-    Blueprint, render_template, redirect, url_for, request, flash, jsonify
+    Blueprint, render_template, redirect, url_for, request, flash, jsonify, send_file
 )
+from io import BytesIO
+from datetime import date
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
 from app.models.database import (
     get_all_models, get_total_count,
     get_items_by_slug, get_item_by_id, get_items_by_status,
     get_compatible_donors, execute_component_transfers, COMPONENT_LABELS,
     fan_exists, insert_item, update_item, bulk_insert_free,
-    delete_item_by_id,
+    delete_item_by_id, delete_items_batch, get_all_inventory, get_status_summary,
 )
 
 inventory_bp = Blueprint('inventory', __name__)
@@ -53,7 +58,7 @@ def preparer_pc():
         'Statut':            r['statut'],
         'Obs':               r['obs'],
         'batterie':          r['batterie'],
-        'has_details':       bool(r['disque_dur'] or r['etat_clavier'] or r['systeme_operateur'] or r['etat_ecran'] or (r['batterie'] is not None) or r['ram'] or r['ports_usb']),
+        'has_details':       bool(r['disque_dur'] or r['etat_clavier'] or r['systeme_operateur'] or r['etat_ecran'] or (r['batterie'] is not None) or r['ram'] or r['ports_usb'] or r['pave_tactile']),
     } for r in rows]
     return render_template('preparer_pc.html', items=items, total_stock=len(items))
 
@@ -180,7 +185,7 @@ def model_detail(slug):
         'Code User':         r['code_user'],
         'N° Licence':        r['license_num'],
         'Obs':               r['obs'],
-        'has_details':       bool(r['disque_dur'] or r['etat_clavier'] or r['systeme_operateur'] or r['etat_ecran'] or (r['batterie'] is not None) or r['ram'] or r['ports_usb']),
+        'has_details':       bool(r['disque_dur'] or r['etat_clavier'] or r['systeme_operateur'] or r['etat_ecran'] or (r['batterie'] is not None) or r['ram'] or r['ports_usb'] or r['pave_tactile']),
     } for r in rows]
 
     model_data = {
@@ -214,6 +219,7 @@ def item_details(db_id):
         'batterie':           row.get('batterie'),
         'ram':                row.get('ram'),
         'ports_usb':          row.get('ports_usb'),
+        'pave_tactile':       row.get('pave_tactile'),
         'obs':                row.get('obs'),
     })
 
@@ -236,7 +242,8 @@ def add_item():
             except ValueError:
                 quantity = 1
             quantity = max(1, min(quantity, 500))
-            bulk_insert_free(slug, model_name, statut, quantity)
+            serial_number = request.form.get('sn', '').strip() or None
+            bulk_insert_free(slug, model_name, statut, quantity, serial_number)
             return redirect(url_for('inventory.model_detail', slug=slug))
 
         # ── FAN uniqueness check ─────────────────────────────────────────
@@ -261,6 +268,7 @@ def add_item():
         etat_ecran        = request.form.get('etat_ecran')        or None
         ram               = request.form.get('ram')               or None
         ports_usb         = request.form.get('ports_usb')         or None
+        pave_tactile      = request.form.get('pave_tactile')      or None
         try:
             batterie = int(request.form.get('batterie', 0))
         except (ValueError, TypeError):
@@ -271,6 +279,7 @@ def add_item():
             username, code_user, license_num, obs,
             disque_dur, etat_clavier, systeme_operateur,
             etat_ecran, batterie, ram, ports_usb,
+            pave_tactile=pave_tactile,
         )
         return redirect(url_for('inventory.model_detail', slug=slug))
 
@@ -317,6 +326,7 @@ def edit_item(db_id):
         etat_ecran        = request.form.get('etat_ecran')        or None
         ram               = request.form.get('ram')               or None
         ports_usb         = request.form.get('ports_usb')         or None
+        pave_tactile      = request.form.get('pave_tactile')      or None
         try:
             batterie_raw = request.form.get('batterie')
             batterie = int(batterie_raw) if batterie_raw is not None and batterie_raw != '' else None
@@ -328,6 +338,7 @@ def edit_item(db_id):
             username, code_user, license_num, obs,
             disque_dur, etat_clavier, systeme_operateur,
             etat_ecran, batterie, ram, ports_usb,
+            pave_tactile=pave_tactile,
         )
         flash('✅ Ordinateur mis à jour avec succès.', 'success')
         return redirect(url_for('inventory.model_detail', slug=slug))
@@ -345,3 +356,82 @@ def delete_item(db_id):
     if slug:
         return redirect(url_for('inventory.model_detail', slug=slug))
     return redirect(url_for('inventory.index'))
+
+
+@inventory_bp.route('/delete-batch', methods=['POST'])
+def delete_batch():
+    ids = [int(value) for value in request.form.getlist('ids') if value.isdigit()]
+    slugs = delete_items_batch(ids)
+    return redirect(url_for('inventory.model_detail', slug=slugs[0]) if len(slugs) == 1 else url_for('inventory.index'))
+
+
+@inventory_bp.route('/export/excel')
+def export_excel():
+    records = get_all_inventory()
+    counts, total = get_status_summary()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Inventaire'
+    ws.merge_cells('A1:H1')
+    ws['A1'] = 'PSA STELLANTIS'
+    ws['A1'].font = Font(name='Aptos Display', size=20, bold=True, color='FFFFFF')
+    ws['A1'].fill = PatternFill('solid', fgColor='17365D')
+    ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 34
+    ws.merge_cells('A2:H2')
+    ws['A2'] = "Rapport d'inventaire parc IT"
+    ws['A2'].font = Font(size=14, bold=True, color='17365D')
+    ws['A2'].alignment = Alignment(horizontal='center')
+    ws.merge_cells('A3:H3')
+    ws['A3'] = f'Date : {date.today().strftime("%d/%m/%Y")}'
+    ws['A3'].alignment = Alignment(horizontal='right')
+    ws.merge_cells('A4:H4')
+    ws['A4'] = 'Inventaire complet du parc informatique'
+    headers = ['Modèle', 'Numéro FAN', 'SN', 'Status', 'Utilisateur', 'Code User', 'Licence', 'Batterie']
+    header_row = 6
+    for col, label in enumerate(headers, 1):
+        cell = ws.cell(header_row, col, label)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='2874A6')
+        cell.alignment = Alignment(horizontal='center')
+    thin = Side(style='thin', color='AAB7B8')
+    for record in records:
+        battery = record.get('batterie')
+        battery_value = '❌ Batterie absente' if battery == 0 else (f'{battery}%' if battery is not None else '')
+        values = [record['model_name'], record['fan'] or '—', record['sn'] or '—', record['statut'] or '', record['username'] or '', record['code_user'] or '', record['license_num'] or '', battery_value]
+        ws.append(values)
+    for row in ws.iter_rows(min_row=header_row, max_row=ws.max_row, min_col=1, max_col=len(headers)):
+        for cell in row:
+            cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+            if cell.row > header_row and cell.row % 2 == 1:
+                cell.fill = PatternFill('solid', fgColor='F2F6FA')
+    for col in range(1, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(col)].width = [25, 18, 20, 28, 24, 18, 20, 24][col-1]
+    ws.freeze_panes = 'A7'
+    ws.auto_filter.ref = f'A{header_row}:H{ws.max_row}'
+
+    summary = wb.create_sheet('Résumé')
+    summary.merge_cells('A1:B1')
+    summary['A1'] = 'Résumé de l’inventaire'
+    summary['A1'].font = Font(size=16, bold=True, color='FFFFFF')
+    summary['A1'].fill = PatternFill('solid', fgColor='17365D')
+    summary['A1'].alignment = Alignment(horizontal='center')
+    for col, label in enumerate(['Status', 'Total'], 1):
+        cell = summary.cell(3, col, label)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='2874A6')
+    statuses = ['En stock', 'Affecter', 'Créé', 'Utilisation hors domaine', 'Free']
+    for status in statuses:
+        summary.append([status, counts.get(status, 0)])
+    summary.append(['Total général', total])
+    for row in summary.iter_rows(min_row=3, max_row=summary.max_row, min_col=1, max_col=2):
+        for cell in row:
+            cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    summary['A9'].font = Font(bold=True)
+    summary['B9'].font = Font(bold=True)
+    summary.column_dimensions['A'].width = 32
+    summary.column_dimensions['B'].width = 16
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(output, as_attachment=True, download_name='rapport_inventaire_it.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
