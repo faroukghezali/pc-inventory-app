@@ -1,0 +1,10 @@
+{
+  "name": "PC Inventory App",
+  "postStartCommand": "nohup python main.py > app.log 2>&1 &",
+  "portsAttributes": {
+    "5000": {
+      "label": "Inventory Web App",
+      "visibility": "public"
+    }
+  }
+}
