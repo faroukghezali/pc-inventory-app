@@ -6,7 +6,7 @@
 const FIELD_RULES = {
   '':                         [],
   'En stock':                 ['model', 'fan', 'sn', 'hw-details', 'obs'],
-  'Affecter':                 ['model', 'fan', 'sn', 'username', 'code-user', 'licence', 'obs'],
+  'Affecter':                 ['model', 'fan', 'sn', 'username', 'code-user', 'licence', 'obs', 'hw-details'],
   'Créé':                     ['model', 'fan', 'username', 'code-user'],
   'Free':                     ['model', 'quantity', 'sn'],
   'Utilisation hors domaine': ['model', 'fan', 'sn', 'hw-details', 'obs'],
@@ -41,6 +41,11 @@ function applyStatutVisibility() {
       el.disabled = !show;
     });
   });
+  const fanInput = document.getElementById('fanInput');
+  if (fanInput) {
+    fanInput.required = statut === 'Créé';
+    fanInput.closest('div')?.querySelector('.required')?.classList.toggle('hidden', statut !== 'Créé');
+  }
 }
 
 // ── Battery slider live label ───────────────────────────────────────────────

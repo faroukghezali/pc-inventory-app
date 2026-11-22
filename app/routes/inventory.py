@@ -3,9 +3,13 @@ Inventory routes — all HTTP endpoints for the application.
 No SQL here: delegate everything to app.models.database.
 """
 from flask import (
-    Blueprint, render_template, redirect, url_for, request, flash, jsonify, send_file
+    Blueprint, render_template, redirect, url_for, request, flash, jsonify
 )
 from io import BytesIO
+import os
+import sqlite3
+import tempfile
+from flask import current_app, g, send_file
 from datetime import date
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
@@ -16,9 +20,62 @@ from app.models.database import (
     get_compatible_donors, execute_component_transfers, COMPONENT_LABELS,
     fan_exists, insert_item, update_item, bulk_insert_free,
     delete_item_by_id, delete_items_batch, get_all_inventory, get_status_summary,
+    get_db,
 )
 
 inventory_bp = Blueprint('inventory', __name__)
+
+
+@inventory_bp.route('/admin/database/backup')
+def database_backup():
+    source = sqlite3.connect(current_app.config['DB_PATH'])
+    snapshot = sqlite3.connect(':memory:')
+    source.backup(snapshot)
+    source.close()
+    output = BytesIO()
+    # Serialize the consistent SQLite snapshot, including committed data.
+    output.write(snapshot.serialize())
+    output.seek(0)
+    snapshot.close()
+    return send_file(output, mimetype='application/vnd.sqlite3', as_attachment=True,
+                     download_name='inventory-backup.sqlite3')
+
+
+@inventory_bp.route('/admin/database/restore', methods=['POST'])
+def database_restore():
+    upload = request.files.get('database')
+    if not upload or not upload.filename:
+        flash('Sélectionnez un fichier de sauvegarde SQLite.', 'error')
+        return redirect(url_for('inventory.index'))
+    temp_path = None
+    check = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.sqlite3', delete=False) as temp:
+            temp_path = temp.name
+            upload.save(temp)
+        check = sqlite3.connect(temp_path)
+        valid = check.execute('PRAGMA quick_check').fetchone()[0] == 'ok'
+        tables = {row[0] for row in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        valid = valid and {'inventory', 'app_users'}.issubset(tables)
+        if not valid:
+            raise ValueError('Le fichier ne contient pas une base d’inventaire valide.')
+        target_path = current_app.config['DB_PATH']
+        current_db = g.pop('db', None)
+        if current_db:
+            current_db.close()
+        target = sqlite3.connect(target_path)
+        check.backup(target)
+        target.close()
+        check.close()
+        flash('Base de données restaurée avec succès.', 'success')
+    except (sqlite3.Error, ValueError) as error:
+        flash(str(error) or 'Fichier SQLite invalide.', 'error')
+    finally:
+        if check:
+            check.close()
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+    return redirect(url_for('inventory.index'))
 
 COMPONENT_ICONS = {
     'disque_dur': '💾',
@@ -29,6 +86,186 @@ COMPONENT_ICONS = {
     'ports_usb': '🔌',
     'batterie': '🔋',
 }
+
+ACCESSORY_CATEGORIES = {
+    'disque-sauvegarde': 'Disque sauvegarde', 'casques': 'Casques',
+    'clavier': 'Clavier', 'souris': 'Souris',
+}
+
+
+@inventory_bp.route('/accessoires/<category>')
+def accessory_page(category):
+    if category not in ACCESSORY_CATEGORIES:
+        return redirect(url_for('inventory.index'))
+    rows = get_db().execute('SELECT id, brand, accessory_type, serial_number, created_at FROM accessories WHERE category = ? AND discharge_id IS NULL ORDER BY brand COLLATE NOCASE, id', (category,)).fetchall()
+    brands = sorted({row['brand'] for row in rows}, key=str.casefold)
+    return render_template('accessories.html', category=category, category_name=ACCESSORY_CATEGORIES[category], rows=rows, brands=brands, total=len(rows))
+
+
+@inventory_bp.route('/accessoires/<category>/add', methods=['POST'])
+def accessory_add(category):
+    if category not in ACCESSORY_CATEGORIES:
+        return redirect(url_for('inventory.index'))
+    brand = request.form.get('brand', '').strip()
+    accessory_type = request.form.get('accessory_type', '')
+    serial_number = request.form.get('serial_number', '').strip() or None
+    try:
+        quantity = int(request.form.get('quantity', '0'))
+    except ValueError:
+        quantity = 0
+    if not brand or len(brand) > 100 or accessory_type not in {'USB/type-C', 'Bleutooth', 'USB', 'Type-C'} or quantity < 1 or quantity > 10000:
+        flash('Saisissez une marque et une quantité entre 1 et 10 000.', 'error')
+    else:
+        get_db().executemany('INSERT INTO accessories (category, brand, accessory_type, serial_number) VALUES (?, ?, ?, ?)', [(category, brand, accessory_type, serial_number)] * quantity)
+        get_db().commit()
+        flash(f'{quantity} article(s) {ACCESSORY_CATEGORIES[category]} ajouté(s).', 'success')
+    return redirect(url_for('inventory.accessory_page', category=category))
+
+
+@inventory_bp.route('/accessoires/<category>/update', methods=['POST'])
+def accessory_update(category):
+    item_id = request.form.get('id', type=int)
+    brand = request.form.get('brand', '').strip()
+    accessory_type = request.form.get('accessory_type', '')
+    serial_number = request.form.get('serial_number', '').strip() or None
+    if category not in ACCESSORY_CATEGORIES or not item_id or not brand or len(brand) > 100 or accessory_type not in {'USB/type-C', 'Bleutooth', 'USB', 'Type-C'}:
+        flash('Marque invalide.', 'error')
+    else:
+        get_db().execute('UPDATE accessories SET brand = ?, accessory_type = ?, serial_number = ? WHERE id = ? AND category = ? AND discharge_id IS NULL', (brand, accessory_type, serial_number, item_id, category))
+        get_db().commit()
+        flash('Article modifié.', 'success')
+    return redirect(url_for('inventory.accessory_page', category=category))
+
+
+@inventory_bp.route('/accessoires/<category>/delete', methods=['POST'])
+def accessory_delete(category):
+    ids = [int(value) for value in request.form.getlist('ids') if value.isdigit()]
+    if category in ACCESSORY_CATEGORIES and ids:
+        get_db().executemany('DELETE FROM accessories WHERE id = ? AND category = ? AND discharge_id IS NULL', [(item_id, category) for item_id in ids])
+        get_db().commit()
+        flash(f'{len(ids)} article(s) supprimé(s).', 'success')
+    return redirect(url_for('inventory.accessory_page', category=category))
+
+
+@inventory_bp.route('/decharges')
+def discharge_index():
+    records = get_db().execute("""SELECT i.id, i.model_name, i.fan, i.sn, i.username, i.code_user, i.statut,
+        (SELECT d.issued_at FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1) AS issued_at,
+        COALESCE(i.username, (SELECT d.recipient_name FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1)) AS display_user,
+        COALESCE(i.code_user, (SELECT d.recipient_code FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1)) AS display_code,
+        (SELECT GROUP_CONCAT(category || ': ' || brand, ', ') FROM discharge_items di
+            JOIN discharges d ON d.id=di.discharge_id WHERE d.computer_id=i.id
+            AND d.id=(SELECT MAX(d2.id) FROM discharges d2 WHERE d2.computer_id=i.id)) AS taken_items
+        FROM inventory i WHERE i.statut IN ('Affecter', 'Utilisation hors domaine')
+        OR EXISTS (SELECT 1 FROM discharges dx JOIN discharge_items di ON di.discharge_id=dx.id
+            WHERE dx.computer_id=i.id AND di.returned_at IS NULL) ORDER BY i.id DESC""").fetchall()
+    return render_template('discharge_list.html', records=records)
+
+
+@inventory_bp.route('/restitutions')
+def restitution_index():
+    records = get_db().execute("""SELECT i.id, i.model_name, i.fan, i.sn, i.username, i.code_user, i.statut,
+        (SELECT d.issued_at FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1) AS issued_at,
+        COALESCE(i.username, (SELECT d.recipient_name FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1)) AS display_user,
+        COALESCE(i.code_user, (SELECT d.recipient_code FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1)) AS display_code,
+        (SELECT GROUP_CONCAT(di.category || ': ' || di.brand, ', ') FROM discharge_items di
+            JOIN discharges d ON d.id=di.discharge_id WHERE d.computer_id=i.id AND di.returned_at IS NULL) AS taken_items
+        FROM inventory i WHERE EXISTS (SELECT 1 FROM discharges dx JOIN discharge_items di ON di.discharge_id=dx.id
+            WHERE dx.computer_id=i.id AND di.returned_at IS NULL) ORDER BY i.id DESC""").fetchall()
+    return render_template('discharge_list.html', records=records, movement='restitution')
+
+
+@inventory_bp.route('/decharge/<int:item_id>')
+def discharge_document(item_id):
+    item = get_item_by_id(item_id)
+    has_discharge = get_db().execute('SELECT 1 FROM discharges WHERE computer_id = ? LIMIT 1', (item_id,)).fetchone() if item else None
+    if not item or (item.get('statut') not in {'Affecter', 'Utilisation hors domaine'} and not has_discharge):
+        flash('Cette fiche de décharge est disponible pour les ordinateurs affectés ou hors domaine.', 'error')
+        return redirect(url_for('inventory.discharge_index'))
+    categories = {
+        'casques': 'Casque', 'souris': 'Souris', 'clavier': 'Clavier',
+        'disque-sauvegarde': 'Disque de sauvegarde',
+    }
+    accessories = {}
+    for slug, label in categories.items():
+        accessories[slug] = get_db().execute('''SELECT brand, COUNT(*) AS total_quantity,
+            SUM(CASE WHEN discharge_id IS NULL THEN 1 ELSE 0 END) AS available_quantity
+            FROM accessories WHERE category = ? GROUP BY brand ORDER BY brand COLLATE NOCASE''', (slug,)).fetchall()
+    latest = get_db().execute('SELECT id, recipient_name FROM discharges WHERE computer_id = ? AND assignment_number = ? ORDER BY id DESC LIMIT 1', (item_id, item.get('assignment_number', 0))).fetchone()
+    issued = get_db().execute('SELECT category, brand, serial_number FROM discharge_items WHERE discharge_id = ? ORDER BY category, id', (latest['id'],)).fetchall() if latest else []
+    returned = get_db().execute('SELECT category, brand, serial_number FROM restitution_items WHERE restitution_id = (SELECT id FROM restitutions WHERE computer_id = ? ORDER BY id DESC LIMIT 1) ORDER BY id', (item_id,)).fetchall()
+    return render_template('discharge.html', item=item, accessories=accessories, categories=categories, issued=issued, returned=returned, today=date.today().strftime('%d/%m/%Y'))
+
+
+@inventory_bp.route('/decharge/<int:item_id>/confirm', methods=['POST'])
+def discharge_confirm(item_id):
+    item = get_item_by_id(item_id)
+    if not item or item.get('statut') not in {'Affecter', 'Utilisation hors domaine'}:
+        flash('Ordinateur non admissible pour une décharge.', 'error')
+        return redirect(url_for('inventory.discharge_index'))
+    categories = ['casques', 'souris', 'clavier', 'disque-sauvegarde']
+    db = get_db()
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        selected = [(category, request.form.get(f'brand_{category}', '').strip()) for category in categories if request.form.get(f'brand_{category}', '').strip()]
+        if not selected:
+            raise ValueError('Sélectionnez au moins un accessoire avant de valider la décharge.')
+        discharge_id = db.execute('INSERT INTO discharges (computer_id, recipient_name, recipient_code, assignment_number) VALUES (?, ?, ?, ?)', (item_id, item.get('username'), item.get('code_user'), item.get('assignment_number', 0))).lastrowid
+        for category, brand in selected:
+            cursor = db.execute('''UPDATE accessories SET discharge_id = ? WHERE id = (
+                SELECT id FROM accessories WHERE category = ? AND brand = ? AND discharge_id IS NULL ORDER BY id LIMIT 1
+            ) AND discharge_id IS NULL''', (discharge_id, category, brand))
+            if cursor.rowcount != 1:
+                raise ValueError(f'Rupture de stock pour {ACCESSORY_CATEGORIES[category]} — {brand}.')
+            accessory = db.execute('SELECT id, serial_number FROM accessories WHERE category = ? AND brand = ? AND discharge_id = ? ORDER BY id DESC LIMIT 1', (category, brand, discharge_id)).fetchone()
+            db.execute('INSERT INTO discharge_items (discharge_id, accessory_id, category, brand, serial_number) VALUES (?, ?, ?, ?, ?)', (discharge_id, accessory['id'], category, brand, accessory['serial_number']))
+        db.commit()
+        flash('Accessoires attribués et décharge enregistrée.', 'success')
+    except ValueError as error:
+        db.rollback()
+        flash(str(error), 'error')
+    except sqlite3.Error:
+        db.rollback()
+        flash('Impossible d’enregistrer la décharge. Réessayez.', 'error')
+    return redirect(url_for('inventory.discharge_document', item_id=item_id))
+
+
+@inventory_bp.route('/restitution/<int:item_id>', methods=['GET', 'POST'])
+def restitution_document(item_id):
+    item = get_item_by_id(item_id)
+    if not item:
+        return redirect(url_for('inventory.discharge_index'))
+    db = get_db()
+    if request.method == 'POST':
+        accessory_ids = [int(value) for value in request.form.getlist('accessory_ids') if value.isdigit()]
+        if not accessory_ids:
+            flash('Sélectionnez au moins un accessoire avant de confirmer le retour.', 'error')
+            return redirect(url_for('inventory.restitution_document', item_id=item_id))
+        try:
+            db.execute('BEGIN IMMEDIATE')
+            restitution_id = db.execute('INSERT INTO restitutions (computer_id) VALUES (?)', (item_id,)).lastrowid
+            for accessory_id in accessory_ids:
+                event = db.execute('''SELECT di.category, di.brand, di.serial_number, di.discharge_id
+                    FROM discharge_items di JOIN accessories a ON a.id = di.accessory_id
+                    JOIN discharges d ON d.id = di.discharge_id
+                    WHERE di.accessory_id = ? AND di.returned_at IS NULL AND a.discharge_id = di.discharge_id AND d.computer_id = ?''', (accessory_id, item_id)).fetchone()
+                if not event:
+                    continue
+                db.execute('UPDATE accessories SET discharge_id = NULL WHERE id = ?', (accessory_id,))
+                db.execute('UPDATE discharge_items SET returned_at = CURRENT_TIMESTAMP WHERE accessory_id = ? AND returned_at IS NULL', (accessory_id,))
+                db.execute('INSERT INTO restitution_items (restitution_id, category, brand, serial_number) VALUES (?, ?, ?, ?)', (restitution_id, event['category'], event['brand'], event['serial_number']))
+            db.commit()
+            flash('Retour enregistré et stock mis à jour.', 'success')
+        except (sqlite3.Error, TypeError):
+            db.rollback()
+            flash('Impossible d’enregistrer ce retour.', 'error')
+        return redirect(url_for('inventory.restitution_document', item_id=item_id))
+    outstanding = db.execute('''SELECT di.accessory_id, di.category, di.brand, di.serial_number FROM discharge_items di
+        JOIN discharges d ON d.id = di.discharge_id WHERE d.computer_id = ? AND di.returned_at IS NULL ORDER BY di.id''', (item_id,)).fetchall()
+    returned = db.execute('SELECT category, brand, serial_number FROM restitution_items WHERE restitution_id = (SELECT id FROM restitutions WHERE computer_id = ? ORDER BY id DESC LIMIT 1) ORDER BY id', (item_id,)).fetchall()
+    previous_recipient = db.execute('SELECT recipient_name FROM discharges WHERE computer_id = ? ORDER BY id DESC LIMIT 1', (item_id,)).fetchone()
+    recipient_name = (previous_recipient['recipient_name'] if previous_recipient and previous_recipient['recipient_name'] else None) or item.get('last_recipient') or item.get('username')
+    return render_template('restitution.html', item=item, outstanding=outstanding, returned=returned, recipient_name=recipient_name, today=date.today().strftime('%d/%m/%Y'))
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +422,13 @@ def model_detail(slug):
         'Code User':         r['code_user'],
         'N° Licence':        r['license_num'],
         'Obs':               r['obs'],
+        'disque_dur':        r['disque_dur'],
+        'ram':               r['ram'],
+        'etat_clavier':      r['etat_clavier'],
+        'etat_ecran':        r['etat_ecran'],
+        'systeme_operateur': r['systeme_operateur'],
+        'ports_usb':         r['ports_usb'],
+        'batterie':          r['batterie'],
         'has_details':       bool(r['disque_dur'] or r['etat_clavier'] or r['systeme_operateur'] or r['etat_ecran'] or (r['batterie'] is not None) or r['ram'] or r['ports_usb'] or r['pave_tactile']),
     } for r in rows]
 
@@ -235,6 +479,11 @@ def add_item():
         statut     = request.form.get('statut', '').strip()
         slug       = model_name.lower().replace(' ', '-')
 
+        fan = request.form.get('fan', '').strip() or None
+        if statut == 'Créé' and not fan:
+            flash('Le numéro FAN est obligatoire pour un ordinateur créé.', 'error')
+            return render_template('add_item.html', form_data=request.form)
+
         # ── Free: bulk insert ────────────────────────────────────────────
         if statut == 'Free':
             try:
@@ -247,7 +496,6 @@ def add_item():
             return redirect(url_for('inventory.model_detail', slug=slug))
 
         # ── FAN uniqueness check ─────────────────────────────────────────
-        fan = request.form.get('fan', '').strip() or None
         if fan and fan_exists(fan):
             flash(
                 f'❌ Le numéro FAN « {fan} » existe déjà. Veuillez en saisir un autre.',
@@ -304,6 +552,11 @@ def edit_item(db_id):
 
         # ── FAN uniqueness check (excluding current item) ────────────────
         fan = request.form.get('fan', '').strip() or None
+        if statut == 'Créé' and not fan:
+            flash('Le numéro FAN est obligatoire pour un ordinateur créé.', 'error')
+            form_data = dict(item)
+            form_data.update(request.form)
+            return render_template('edit_item.html', item=form_data)
         if fan and fan_exists(fan, exclude_id=db_id):
             flash(
                 f'❌ Le numéro FAN « {fan} » existe déjà pour un autre ordinateur.',
@@ -333,6 +586,16 @@ def edit_item(db_id):
         except (ValueError, TypeError):
             batterie = None
 
+        if item.get('statut') in {'Free', 'Créé'} and statut == 'Affecter':
+            disque_dur = disque_dur or 'Oui'
+            etat_clavier = etat_clavier or 'Oui'
+            systeme_operateur = systeme_operateur or 'Oui'
+            etat_ecran = etat_ecran or 'Oui'
+            ram = ram or 'Oui'
+            ports_usb = ports_usb or 'Toutes'
+            pave_tactile = pave_tactile or 'Oui'
+            batterie = batterie if batterie is not None else 100
+
         update_item(
             db_id, slug, model_name, fan, sn, statut,
             username, code_user, license_num, obs,
@@ -340,7 +603,19 @@ def edit_item(db_id):
             etat_ecran, batterie, ram, ports_usb,
             pave_tactile=pave_tactile,
         )
+        if statut in {'Affecter', 'Utilisation hors domaine'} and (
+            item.get('statut') not in {'Affecter', 'Utilisation hors domaine'}
+            or item.get('username') != username or item.get('code_user') != code_user
+        ):
+            get_db().execute('UPDATE inventory SET assignment_number = assignment_number + 1 WHERE id = ?', (db_id,))
+            get_db().commit()
         flash('✅ Ordinateur mis à jour avec succès.', 'success')
+        if item.get('statut') == 'Affecter' and statut == 'En stock':
+            get_db().execute('UPDATE inventory SET last_recipient = ? WHERE id = ?', (item.get('username'), db_id))
+            get_db().commit()
+            return redirect(url_for('inventory.restitution_document', item_id=db_id))
+        if statut in {'Affecter', 'Utilisation hors domaine'} and item.get('statut') != statut:
+            return redirect(url_for('inventory.discharge_document', item_id=db_id))
         return redirect(url_for('inventory.model_detail', slug=slug))
 
     return render_template('edit_item.html', item=item)
@@ -368,26 +643,41 @@ def delete_batch():
 @inventory_bp.route('/export/excel')
 def export_excel():
     records = get_all_inventory()
-    counts, total = get_status_summary()
+    selected_ids = {int(value) for value in request.args.getlist('ids') if value.isdigit()}
+    if selected_ids:
+        records = [record for record in records if record['id'] in selected_ids]
+    counts = {}
+    for record in records:
+        if record.get('statut'):
+            counts[record['statut']] = counts.get(record['statut'], 0) + 1
+    total = len(records)
     wb = Workbook()
     ws = wb.active
     ws.title = 'Inventaire'
-    ws.merge_cells('A1:H1')
+    ws.merge_cells('A1:Q1')
     ws['A1'] = 'PSA STELLANTIS'
     ws['A1'].font = Font(name='Aptos Display', size=20, bold=True, color='FFFFFF')
     ws['A1'].fill = PatternFill('solid', fgColor='17365D')
     ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
     ws.row_dimensions[1].height = 34
-    ws.merge_cells('A2:H2')
+    ws.merge_cells('A2:Q2')
     ws['A2'] = "Rapport d'inventaire parc IT"
     ws['A2'].font = Font(size=14, bold=True, color='17365D')
     ws['A2'].alignment = Alignment(horizontal='center')
-    ws.merge_cells('A3:H3')
+    ws.merge_cells('A3:Q3')
     ws['A3'] = f'Date : {date.today().strftime("%d/%m/%Y")}'
     ws['A3'].alignment = Alignment(horizontal='right')
-    ws.merge_cells('A4:H4')
-    ws['A4'] = 'Inventaire complet du parc informatique'
-    headers = ['Modèle', 'Numéro FAN', 'SN', 'Status', 'Utilisateur', 'Code User', 'Licence', 'Batterie']
+    ws.merge_cells('A4:Q4')
+    ws['A4'] = 'Ordinateurs sélectionnés' if selected_ids else 'Inventaire complet du parc informatique'
+    fields = [
+        ('model_name', 'Modèle'), ('fan', 'Numéro FAN'), ('sn', 'SN'),
+        ('statut', 'Statut'), ('username', 'Utilisateur'), ('code_user', 'Code User'),
+        ('license_num', 'Licence'), ('obs', 'Observations'), ('disque_dur', 'Disque dur'),
+        ('ram', 'RAM'), ('etat_clavier', 'Clavier'), ('etat_ecran', 'Écran'),
+        ('systeme_operateur', 'Système opérateur'), ('ports_usb', 'Ports USB'),
+        ('batterie', 'Batterie (%)'), ('pave_tactile', 'Pavé tactile'), ('id', 'ID'),
+    ]
+    headers = [label for _, label in fields]
     header_row = 6
     for col, label in enumerate(headers, 1):
         cell = ws.cell(header_row, col, label)
@@ -396,19 +686,17 @@ def export_excel():
         cell.alignment = Alignment(horizontal='center')
     thin = Side(style='thin', color='AAB7B8')
     for record in records:
-        battery = record.get('batterie')
-        battery_value = '❌ Batterie absente' if battery == 0 else (f'{battery}%' if battery is not None else '')
-        values = [record['model_name'], record['fan'] or '—', record['sn'] or '—', record['statut'] or '', record['username'] or '', record['code_user'] or '', record['license_num'] or '', battery_value]
+        values = [record.get(field) if record.get(field) is not None else '' for field, _ in fields]
         ws.append(values)
     for row in ws.iter_rows(min_row=header_row, max_row=ws.max_row, min_col=1, max_col=len(headers)):
         for cell in row:
             cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
             if cell.row > header_row and cell.row % 2 == 1:
                 cell.fill = PatternFill('solid', fgColor='F2F6FA')
-    for col in range(1, len(headers) + 1):
-        ws.column_dimensions[get_column_letter(col)].width = [25, 18, 20, 28, 24, 18, 20, 24][col-1]
+    for col, (_, label) in enumerate(fields, 1):
+        ws.column_dimensions[get_column_letter(col)].width = max(16, min(30, len(label) + 4))
     ws.freeze_panes = 'A7'
-    ws.auto_filter.ref = f'A{header_row}:H{ws.max_row}'
+    ws.auto_filter.ref = f'A{header_row}:Q{ws.max_row}'
 
     summary = wb.create_sheet('Résumé')
     summary.merge_cells('A1:B1')

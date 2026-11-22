@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Restitutions' if movement == 'restitution' else 'Décharges' }} – IT Inventory{% endblock %}
+{% block content %}
+<div class="page-fade accessory-page discharge-history">
+  <a href="{{ url_for('inventory.index') }}" class="btn-back">Retour à l’accueil</a>
+  <header class="accessory-heading"><div><h1>{{ 'Restitutions' if movement == 'restitution' else 'Décharges' }}</h1><p class="text-muted">{{ 'Ordinateurs avec des accessoires en attente de restitution.' if movement == 'restitution' else 'Recherchez les ordinateurs affectés et consultez leurs remises d’accessoires.' }}</p></div></header>
+  <div class="discharge-search-grid">
+    <label>Code user<input id="searchCodeUser" class="form-input" placeholder="Rechercher un code user" oninput="filterDischarges()"></label>
+    <label>FAN<input id="searchFan" class="form-input" placeholder="Rechercher un FAN" oninput="filterDischarges()"></label>
+    <label>Utilisateur<input id="searchUser" class="form-input" placeholder="Rechercher un nom" oninput="filterDischarges()"></label>
+    <label>Date<input id="searchDate" type="date" class="form-input" oninput="filterDischarges()"></label>
+  </div>
+  <div class="card accessory-table-wrap"><table class="inv-table"><thead><tr><th>Modèle</th><th>FAN</th><th>SN</th><th>Code user</th><th>Bénéficiaire</th><th>Statut</th><th>Articles remis</th><th>Date décharge</th><th></th></tr></thead><tbody id="dischargeRows">
+    {% for row in records %}<tr class="discharge-record" data-code="{{ (row.display_code or '')|lower }}" data-fan="{{ (row.fan or '')|lower }}" data-user="{{ (row.display_user or '')|lower }}" data-date="{{ (row.issued_at or '')[:10] }}"><td>{{ row.model_name }}</td><td>{{ row.fan or '—' }}</td><td>{{ row.sn or '—' }}</td><td>{{ row.display_code or '—' }}</td><td>{{ row.display_user or '—' }}</td><td>{{ row.statut }}</td><td>{{ row.taken_items or 'Laptop seul' }}</td><td>{{ row.issued_at or '—' }}</td><td><a class="btn btn-secondary" href="{{ url_for('inventory.restitution_document' if movement == 'restitution' else 'inventory.discharge_document', item_id=row.id) }}">Ouvrir</a></td></tr>{% else %}<tr><td colspan="9" class="accessory-empty">{{ 'Aucun accessoire en attente de restitution.' if movement == 'restitution' else 'Aucun ordinateur affecté ou hors domaine.' }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endblock %}
+{% block extra_scripts %}<script>
+function filterDischarges(){const code=document.getElementById('searchCodeUser').value.trim().toLowerCase(),fan=document.getElementById('searchFan').value.trim().toLowerCase(),user=document.getElementById('searchUser').value.trim().toLowerCase(),date=document.getElementById('searchDate').value;document.querySelectorAll('.discharge-record').forEach(row=>row.hidden=!(row.dataset.code.includes(code)&&row.dataset.fan.includes(fan)&&row.dataset.user.includes(user)&&(!date||row.dataset.date===date)))}
+</script>{% endblock %}

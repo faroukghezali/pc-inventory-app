@@ -20,14 +20,14 @@
             </svg>
             Préparer un PC
         </a>
-        <a href="{{ url_for('inventory.add_item') }}" class="btn btn-primary">
+        {% if current_user.access_level in ['write', 'full'] %}<a href="{{ url_for('inventory.add_item') }}" class="btn btn-primary">
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"
                  fill="none" stroke="currentColor" stroke-width="2.5"
                  stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 5v14M5 12h14"/>
             </svg>
             Ajouter un PC
-        </a>
+        </a>{% endif %}
         <div class="stat-badge">
             <span class="label">Total Ordinateurs</span>
             <span class="value">{{ total_pcs }}</span>
@@ -55,9 +55,9 @@
     {% else %}
     <div style="grid-column:1/-1;text-align:center;padding:3.5rem 1.5rem;" class="card">
         <p class="text-muted" style="font-size:0.95rem;margin-bottom:0.75rem;">Aucun équipement enregistré pour le moment.</p>
-        <a href="{{ url_for('inventory.add_item') }}" class="btn btn-primary" style="font-size:0.85rem;">
+        {% if current_user.access_level in ['write', 'full'] %}<a href="{{ url_for('inventory.add_item') }}" class="btn btn-primary" style="font-size:0.85rem;">
             + Ajouter votre premier PC
-        </a>
+        </a>{% endif %}
     </div>
     {% endfor %}
 </div>

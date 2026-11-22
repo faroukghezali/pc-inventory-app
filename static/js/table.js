@@ -37,7 +37,36 @@ function onRowCheckboxChange(checkbox) {
   if (checkbox.checked) { selectedDbIds.add(checkbox.dataset.dbId); row?.classList.add('row-selected'); }
   else { selectedDbIds.delete(checkbox.dataset.dbId); row?.classList.remove('row-selected'); }
   selectedDbId = selectedDbIds.size === 1 ? [...selectedDbIds][0] : null;
+  updateSelectAllState();
   updateActionButtonsState();
+}
+
+function toggleSelectAllRows(master) {
+  document.querySelectorAll('#inventoryTable tbody .row-select-checkbox').forEach(checkbox => {
+    checkbox.checked = master.checked;
+    const row = checkbox.closest('tr');
+    if (master.checked) selectedDbIds.add(checkbox.dataset.dbId);
+    else selectedDbIds.delete(checkbox.dataset.dbId);
+    row?.classList.toggle('row-selected', master.checked);
+  });
+  selectedDbId = selectedDbIds.size === 1 ? [...selectedDbIds][0] : null;
+  updateSelectAllState();
+  updateActionButtonsState();
+}
+
+function updateSelectAllState() {
+  const master = document.getElementById('selectAllRows');
+  if (!master) return;
+  const boxes = [...document.querySelectorAll('#inventoryTable tbody .row-select-checkbox')];
+  const checked = boxes.filter(box => box.checked).length;
+  master.checked = boxes.length > 0 && checked === boxes.length;
+  master.indeterminate = checked > 0 && checked < boxes.length;
+}
+
+function exportSelectedRows() {
+  const url = new URL('/export/excel', window.location.origin);
+  selectedDbIds.forEach(id => url.searchParams.append('ids', id));
+  window.location.href = url.toString();
 }
 
 function selectRowById(dbId) {

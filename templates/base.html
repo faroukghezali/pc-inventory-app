@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{% block title %}Gestion de Parc Informatique{% endblock %}</title>
 
     <!-- Design system -->
@@ -21,7 +22,50 @@
                 <span class="dot"></span>
                 IT Inventory
             </a>
-            <span class="navbar-badge">SQLite Active</span>
+            <div class="navbar-actions">
+                {% if current_user %}
+                <span class="navbar-badge">{{ current_user.username }}</span>
+                <div class="accessories-menu">
+                    <a href="#" class="accessories-trigger" onclick="return false;">Accessoires</a>
+                    <div class="accessories-dropdown">
+                        {% for slug, label in [('disque-sauvegarde', 'Disque sauvegarde'), ('casques', 'Casques'), ('clavier', 'Clavier'), ('souris', 'Souris')] %}
+                        <a href="{{ url_for('inventory.accessory_page', category=slug) }}">{{ label }}</a>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="accessories-menu movement-menu">
+                    <a href="#" class="accessories-trigger" onclick="return false;">Mouvement</a>
+                    <div class="accessories-dropdown">
+                        <a href="{{ url_for('inventory.discharge_index') }}">Décharge</a>
+                        <a href="{{ url_for('inventory.restitution_index') }}">Restitution</a>
+                    </div>
+                </div>
+                {% if current_user.is_admin %}
+                <div class="file-menu">
+                    <a href="#" class="file-trigger" onclick="return false;">Fichier</a>
+                    <div class="file-dropdown">
+                        <a href="{{ url_for('inventory.database_backup') }}">Save Database</a>
+                        <form method="POST" action="{{ url_for('inventory.database_restore') }}" enctype="multipart/form-data">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <label class="file-option">Load Database<input type="file" name="database" accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3" required onchange="this.form.submit()" aria-label="Charger la base de données"></label>
+                        </form>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="contact-menu">
+                    <button type="button" class="contact-trigger" aria-label="Contact et options du compte">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0M19 5v5m-2.5-2.5h5"/></svg>
+                    </button>
+                    <div class="contact-dropdown">
+                        {% if current_user.is_admin %}<a class="contact-option" href="{{ url_for('auth.user_management') }}">User Management</a>{% endif %}
+                        <form method="POST" action="{{ url_for('auth.logout') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="contact-option btn-logout" type="submit">Log Out <span>(Se déconnecter)</span></button>
+                        </form>
+                    </div>
+                </div>
+                {% else %}<span class="navbar-badge">Connexion</span>{% endif %}
+            </div>
         </div>
     </nav>
 

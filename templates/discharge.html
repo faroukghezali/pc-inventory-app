@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Décharge – {{ item.model_name }}{% endblock %}
+{% block content %}
+<div class="page-fade discharge-page">
+  <a href="{{ url_for('inventory.discharge_index') }}" class="btn-back">← Retour aux décharges</a>
+  {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+  <header class="accessory-heading">
+    <div><span class="accessory-kicker">DOCUMENT DE REMISE</span><h1>Préparer une décharge</h1><p class="text-muted">Choisissez les accessoires du stock à remettre. Le stock baisse à la validation.</p></div>
+    <div class="discharge-top-actions"><a class="btn btn-secondary" href="{{ url_for('inventory.discharge_index') }}">Annuler</a><button class="btn btn-primary" type="button" onclick="window.print()">Imprimer la décharge</button><button class="btn btn-discharge-confirm" type="submit" form="dischargeSelectionForm">OK · Valider</button></div>
+  </header>
+  <form id="dischargeSelectionForm" method="POST" action="{{ url_for('inventory.discharge_confirm', item_id=item.id) }}" class="discharge-layout">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <section class="card discharge-controls"><h2>Accessoires remis</h2><p class="text-muted">Cochez une catégorie puis choisissez une marque disponible.</p>
+      {% for slug,label in categories.items() %}
+      <div class="discharge-accessory">
+        <label class="discharge-category-label"><input type="checkbox" class="discharge-check" data-slug="{{ slug }}" data-label="{{ label }}" onchange="toggleDischargeAccessory(this)">{{ label }}</label>
+        <div class="discharge-detail hidden" id="detail-{{ slug }}">
+          <label class="form-label">Marque disponible
+            <select class="form-select discharge-brand" name="brand_{{ slug }}" data-slug="{{ slug }}" onchange="renderDischargeItems()" disabled>
+              <option value="">Choisir une marque</option>
+              {% for option in accessories[slug] %}<option value="{{ option.brand }}" {% if not option.available_quantity %}disabled{% endif %}>{{ option.brand }} — {{ option.available_quantity }} disponible(s)</option>{% endfor %}
+            </select>
+          </label>
+          {% if not accessories[slug] or accessories[slug]|selectattr('available_quantity')|list|length == 0 %}<p class="stock-empty-alert">Aucun stock disponible pour cette catégorie.</p>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </section>
+    <article class="discharge-paper" id="dischargePaper">
+      <div class="discharge-date">Alger le : {{ today }}</div>
+      <div class="discharge-company"><strong>STELLANTIS EL DJAZAIR</strong><span>DIRECTION ADMINISTRATIVE ET FINANCES</span><span>DEPARTEMENT INFORMATIQUE</span></div>
+      <h2>Décharge</h2>
+      <p>Je soussigné(e) Mr (Mme) : <strong>{{ item.username or '________________________________' }}</strong>, atteste par la présente avoir reçu de la part de STELLANTIS EL DJAZAIR (Département IT) :</p>
+      <ul class="discharge-items"><li>Un laptop {{ item.model_name }}{% if item.sn %} dont le numéro de série est : {{ item.sn }}{% endif %}</li>
+        {% for accessory in issued %}<li>Un(e) {{ categories[accessory.category] }} {{ accessory.brand }}{% if accessory.serial_number %} · SN {{ accessory.serial_number }}{% endif %}</li>{% endfor %}
+        <div id="dynamicAccessories"></div>
+      </ul>
+      <div class="discharge-signature">Signature du bénéficiaire</div>
+    </article>
+  </form>
+</div>
+{% endblock %}
+{% block extra_scripts %}<script>
+function toggleDischargeAccessory(box){const select=document.querySelector(`.discharge-brand[data-slug="${box.dataset.slug}"]`);document.getElementById('detail-'+box.dataset.slug).classList.toggle('hidden',!box.checked);select.disabled=!box.checked;select.required=box.checked;renderDischargeItems()}
+function renderDischargeItems(){const target=document.getElementById('dynamicAccessories');target.replaceChildren();document.querySelectorAll('.discharge-check:checked').forEach(box=>{const select=document.querySelector(`.discharge-brand[data-slug="${box.dataset.slug}"]`);if(!select.value)return;const li=document.createElement('li');li.textContent=`Un(e) ${box.dataset.label.toLowerCase()} ${select.value}`;target.appendChild(li)})}
+</script>{% endblock %}

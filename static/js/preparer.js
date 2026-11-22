@@ -277,7 +277,7 @@ async function executePreparationProcess() {
   // Start API request in parallel
   const apiPromise = fetch('/preparer/execute-transfer', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || '' },
     body: JSON.stringify({
       target_id: currentAnalysisData.target.id,
       transfers: transfers

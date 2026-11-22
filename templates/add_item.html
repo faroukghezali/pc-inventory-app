@@ -30,6 +30,7 @@
         {% endwith %}
 
         <form method="POST" id="addForm" style="display:flex;flex-direction:column;gap:1.1rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
             <!-- ① STATUT — always first -->
             <div>
@@ -72,7 +73,7 @@
             <!-- ④ FAN -->
             <div id="field-fan" class="hidden">
                 <label class="form-label">Numéro FAN</label>
-                <input type="text" name="fan" placeholder="Numéro FAN (unique)"
+                <input type="text" name="fan" id="fanInput" placeholder="Numéro FAN (unique)"
                        value="{{ form_data.get('fan', '') }}"
                        class="form-input">
             </div>

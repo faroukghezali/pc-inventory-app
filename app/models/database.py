@@ -45,6 +45,8 @@ def init_db():
             fan                TEXT    UNIQUE,
             sn                 TEXT,
             statut             TEXT,
+            assignment_number  INTEGER NOT NULL DEFAULT 0,
+            last_recipient     TEXT,
             username           TEXT,
             code_user          TEXT,
             license_num        TEXT,
@@ -59,9 +61,85 @@ def init_db():
             pave_tactile       TEXT
         )
     ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS app_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            password_hash TEXT NOT NULL,
+            access_level TEXT NOT NULL CHECK(access_level IN ('read', 'write', 'full')),
+            is_admin INTEGER NOT NULL DEFAULT 0,
+            email TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS accessories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            brand TEXT NOT NULL,
+            accessory_type TEXT NOT NULL DEFAULT 'USB',
+            serial_number TEXT,
+            discharge_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    accessory_columns = {r[1] for r in conn.execute('PRAGMA table_info(accessories)').fetchall()}
+    if 'accessory_type' not in accessory_columns:
+        conn.execute("ALTER TABLE accessories ADD COLUMN accessory_type TEXT NOT NULL DEFAULT 'USB'")
+    conn.execute("UPDATE accessories SET accessory_type = 'USB' WHERE accessory_type = 'Bluetooth/USB'")
+    conn.execute("UPDATE accessories SET accessory_type = 'Type-C' WHERE accessory_type = 'Type-C/USB'")
+    if 'serial_number' not in accessory_columns:
+        conn.execute('ALTER TABLE accessories ADD COLUMN serial_number TEXT')
+    if 'discharge_id' not in accessory_columns:
+        conn.execute('ALTER TABLE accessories ADD COLUMN discharge_id INTEGER')
+    conn.execute('''CREATE TABLE IF NOT EXISTS discharges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        computer_id INTEGER NOT NULL,
+        recipient_name TEXT,
+        recipient_code TEXT,
+        issued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )''')
+    discharge_columns = {r[1] for r in conn.execute('PRAGMA table_info(discharges)').fetchall()}
+    if 'assignment_number' not in discharge_columns:
+        conn.execute('ALTER TABLE discharges ADD COLUMN assignment_number INTEGER NOT NULL DEFAULT 0')
+    if 'recipient_name' not in discharge_columns:
+        conn.execute('ALTER TABLE discharges ADD COLUMN recipient_name TEXT')
+    if 'recipient_code' not in discharge_columns:
+        conn.execute('ALTER TABLE discharges ADD COLUMN recipient_code TEXT')
+    conn.execute('''CREATE TABLE IF NOT EXISTS discharge_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        discharge_id INTEGER NOT NULL,
+        accessory_id INTEGER NOT NULL,
+        category TEXT NOT NULL,
+        brand TEXT NOT NULL,
+        serial_number TEXT,
+        returned_at TEXT,
+        UNIQUE(discharge_id, accessory_id)
+    )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS restitutions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        computer_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS restitution_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        restitution_id INTEGER NOT NULL,
+        category TEXT NOT NULL,
+        brand TEXT NOT NULL,
+        serial_number TEXT
+    )''')
+    conn.execute('''INSERT OR IGNORE INTO discharge_items (discharge_id, accessory_id, category, brand, serial_number)
+        SELECT discharge_id, id, category, brand, serial_number FROM accessories WHERE discharge_id IS NOT NULL''')
 
     # Safe migration: add new columns to existing DBs
     existing = {r[1] for r in conn.execute('PRAGMA table_info(inventory)').fetchall()}
+    if 'last_recipient' not in existing:
+        conn.execute('ALTER TABLE inventory ADD COLUMN last_recipient TEXT')
+    if 'assignment_number' not in existing:
+        conn.execute('ALTER TABLE inventory ADD COLUMN assignment_number INTEGER NOT NULL DEFAULT 0')
+    user_columns = {r[1] for r in conn.execute('PRAGMA table_info(app_users)').fetchall()}
+    if 'email' not in user_columns:
+        conn.execute('ALTER TABLE app_users ADD COLUMN email TEXT')
     new_cols = [
         ('disque_dur',         'TEXT'),
         ('etat_clavier',       'TEXT'),
