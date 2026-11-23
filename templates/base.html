@@ -22,6 +22,10 @@
                 <span class="dot"></span>
                 IT Inventory
             </a>
+            {% if current_user %}<button type="button" class="ai-assistant-trigger" id="aiAssistantTrigger" aria-label="Ouvrir l’assistant IA d’inventaire" aria-haspopup="dialog" aria-controls="aiAssistantModal" aria-expanded="false">
+                <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="6" y="9" width="20" height="17" rx="5"/><path d="M16 4v5M12 4h8M3 16h3m20 0h3M11 15h.01M21 15h.01M12 21h8M9 26v2m14-2v2"/><circle cx="11" cy="4" r="1"/><circle cx="21" cy="4" r="1"/></svg>
+                <span class="ai-trigger-pulse" aria-hidden="true"></span>
+            </button>{% endif %}
             <div class="navbar-actions">
                 {% if current_user %}
                 <span class="navbar-badge">{{ current_user.username }}</span>
@@ -71,10 +75,40 @@
     </nav>
 
     <!-- ── Page content ───────────────────────────────────── -->
+    {% if current_user %}
+    <div class="ai-assistant-overlay hidden" id="aiAssistantModal" aria-hidden="true">
+        <section class="ai-assistant-dialog" role="dialog" aria-modal="true" aria-labelledby="aiAssistantTitle">
+            <header class="ai-assistant-header">
+                <div class="ai-assistant-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32"><rect x="6" y="9" width="20" height="17" rx="5"/><path d="M16 4v5M12 4h8M3 16h3m20 0h3M11 15h.01M21 15h.01M12 21h8M9 26v2m14-2v2"/></svg></div>
+                <div><span class="ai-kicker">INVENTORY INTELLIGENCE</span><h2 id="aiAssistantTitle">Assistant de parc</h2></div>
+                <button type="button" class="ai-close" id="aiAssistantClose" aria-label="Fermer">×</button>
+            </header>
+            <div class="ai-scanner" id="aiScanner" aria-live="polite">
+                <div class="ai-robot-stage" aria-hidden="true">
+                    <div class="ai-orbit ai-orbit-one"></div><div class="ai-orbit ai-orbit-two"></div>
+                    <div class="ai-robot"><div class="ai-robot-antenna"></div><div class="ai-robot-face"><i></i><i></i><b></b></div><div class="ai-robot-neck"></div><div class="ai-robot-body"><span></span><span></span><span></span></div></div>
+                    <div class="ai-scan-line"></div>
+                </div>
+                <span class="ai-scan-label">ANALYSE EN COURS</span>
+                <p class="ai-scan-status" id="aiScanStatus">Connexion au registre d’inventaire…</p>
+                <div class="ai-progress-track" role="progressbar" aria-label="Progression de l’analyse" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="aiProgressTrack"><span id="aiProgressBar"></span></div>
+                <div class="ai-progress-meta"><span>SCAN EN DIRECT</span><strong id="aiProgressValue">0%</strong></div>
+                <button type="button" class="ai-retry hidden" id="aiRetry">Réessayer l’analyse</button>
+            </div>
+            <div class="ai-results hidden" id="aiResults" aria-live="polite">
+                <div class="ai-results-summary"><div class="ai-summary-icon" aria-hidden="true">⌁</div><div><strong id="aiResultHeadline">Analyse terminée</strong><span id="aiResultSubhead"></span></div><span class="ai-live-pill"><i></i> LIVE</span></div>
+                <div class="ai-results-list" id="aiResultsList"></div>
+            </div>
+            <footer class="ai-assistant-footer"><span class="ai-secure-dot"></span><span>Basé sur les décharges et restitutions enregistrées</span><span class="ai-updated" id="aiUpdatedAt"></span></footer>
+        </section>
+    </div>
+    {% endif %}
+
     <main>
         {% block content %}{% endblock %}
     </main>
 
     {% block extra_scripts %}{% endblock %}
+    {% if current_user %}<script src="{{ url_for('static', filename='js/ai_assistant.js') }}" defer></script>{% endif %}
 </body>
 </html>

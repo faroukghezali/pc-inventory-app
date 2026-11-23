@@ -39,14 +39,14 @@
   </form>
 </div></div>
 
-<div id="accessoryEditModal" class="accessory-modal hidden" role="dialog" aria-modal="true"><div class="accessory-dialog"><button class="modal-close-btn accessory-close" type="button" onclick="this.closest('.accessory-modal').classList.add('hidden')" aria-label="Fermer">×</button><h2>Mettre à jour</h2>
-  <form method="POST" action="{{ url_for('inventory.accessory_update', category=category) }}" class="accessory-add-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="id" id="editAccessoryId">
+<div id="accessoryEditModal" class="accessory-modal hidden {{ 'phone-modal' if category == 'telephones' else '' }}" role="dialog" aria-modal="true"><div class="accessory-dialog {{ 'phone-dialog' if category == 'telephones' else '' }}"><button class="modal-close-btn accessory-close" type="button" onclick="this.closest('.accessory-modal').classList.add('hidden')" aria-label="Fermer">×</button><h2>Mettre à jour</h2>
+  <form method="POST" action="{{ url_for('inventory.accessory_update', category=category) }}" class="accessory-add-form{{ ' phone-add-form' if category == 'telephones' else '' }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="id" id="editAccessoryId">
     <label class="form-label">{{ 'Marque du téléphone' if category == 'telephones' else 'Marque' }}<input class="form-input" name="brand" id="editAccessoryBrand" maxlength="100" required></label>
     {% if category == 'telephones' %}
-    <label class="form-label">Modèle du téléphone<input class="form-input" name="phone_model" id="editAccessoryModel" maxlength="100" required></label><label class="form-label">Numéro de série (SN)<input class="form-input" name="serial_number" id="editAccessorySn" maxlength="120"></label><label class="form-label">Mémoire RAM<input class="form-input" name="ram" id="editAccessoryRam" maxlength="60"></label><label class="form-label">Stockage<input class="form-input" name="storage" id="editAccessoryStorage" maxlength="60"></label><label class="form-label">Autres détails techniques<textarea class="form-input" name="technical_details" id="editAccessoryDetails" maxlength="500" rows="3"></textarea></label>
+    <label class="form-label">Modèle du téléphone<input class="form-input" name="phone_model" id="editAccessoryModel" maxlength="100" required></label><label class="form-label">Numéro de série (SN)<input class="form-input" name="serial_number" id="editAccessorySn" maxlength="120"></label><label class="form-label">Mémoire RAM<input class="form-input" name="ram" id="editAccessoryRam" maxlength="60"></label><label class="form-label">Stockage<input class="form-input" name="storage" id="editAccessoryStorage" maxlength="60"></label><label class="form-label phone-full-row">Autres détails techniques<textarea class="form-input" name="technical_details" id="editAccessoryDetails" maxlength="500" rows="2"></textarea></label>
     {% else %}
     <label class="form-label">Type<select class="form-select" name="accessory_type" id="editAccessoryType"><option>USB/type-C</option><option>Bleutooth</option><option>USB</option><option>Type-C</option></select></label><label class="form-label">SN<input class="form-input" name="serial_number" id="editAccessorySn" maxlength="120"></label>
-    {% endif %}<button class="btn btn-primary accessory-add-button" type="submit">Enregistrer</button>
+    {% endif %}<button class="btn btn-primary accessory-add-button{{ ' phone-full-row' if category == 'telephones' else '' }}" type="submit">Enregistrer</button>
   </form>
 </div></div>
 {% endblock %}

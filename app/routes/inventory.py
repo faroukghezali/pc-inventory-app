@@ -200,7 +200,7 @@ def discharge_index():
         COALESCE(d.recipient_name, i.username) AS display_user,
         COALESCE(d.recipient_code, i.code_user) AS display_code,
         i.id AS computer_id, i.fan,
-        GROUP_CONCAT(CASE WHEN di.category = 'telephones' THEN 'Téléphone' ELSE di.category END || ': ' || di.brand || CASE WHEN di.phone_model IS NOT NULL THEN ' ' || di.phone_model ELSE '' END, ', ') AS taken_items
+        GROUP_CONCAT(CASE WHEN di.category = 'telephones' THEN 'Téléphone' ELSE di.category END || ': ' || di.brand || CASE WHEN di.phone_model IS NOT NULL THEN ' ' || di.phone_model ELSE '' END || CASE WHEN di.category = 'telephones' AND di.serial_number IS NOT NULL THEN ' · SN ' || di.serial_number ELSE '' END, ', ') AS taken_items
         FROM discharges d JOIN inventory i ON i.id=d.computer_id
         JOIN discharge_items di ON di.discharge_id=d.id AND di.returned_at IS NULL
         GROUP BY d.id ORDER BY d.id DESC""").fetchall()
@@ -442,6 +442,129 @@ def restitution_record_document(restitution_id):
         WHERE restitution_id=? ORDER BY id''', (restitution_id,)).fetchall()
     return render_template('restitution_record.html', record=record, returned=returned,
                            today=date.today().strftime('%d/%m/%Y'))
+
+
+@inventory_bp.route('/api/ai/inventory-analysis')
+def ai_inventory_analysis():
+    """Summarize issued, returned, and never-issued equipment for employees."""
+    db = get_db()
+    equipment = {
+        'casques': 'Casque',
+        'telephones': 'Téléphone',
+        'disque-sauvegarde': 'Disque de sauvegarde',
+    }
+    people = {}
+
+    def employee_key(name, code):
+        normalized_code = (code or '').strip().casefold()
+        if normalized_code:
+            return 'code:' + normalized_code
+        normalized_name = ' '.join((name or '').split()).casefold()
+        return 'name:' + normalized_name if normalized_name else None
+
+    def get_person(name, fan, code):
+        key = employee_key(name, code)
+        if not key:
+            return None
+        person = people.setdefault(key, {
+            'full_name': '', 'fan': '', 'code_user': '', 'current': False,
+            'issue_counts': {}, 'returned_counts': {}, 'restitution_counts': {},
+        })
+        if name and not person['full_name']:
+            person['full_name'] = ' '.join(name.split())
+        if fan and not person['fan']:
+            person['fan'] = fan
+        if code and not person['code_user']:
+            person['code_user'] = code
+        return person
+
+    for row in db.execute('''SELECT username, fan, code_user FROM inventory
+        WHERE statut IN ('Affecter', 'Utilisation hors domaine')
+        AND (COALESCE(username, '') <> '' OR COALESCE(code_user, '') <> '')'''):
+        person = get_person(row['username'], row['fan'], row['code_user'])
+        if person:
+            person['current'] = True
+
+    issued_rows = db.execute('''SELECT d.recipient_name, d.recipient_code,
+        i.username AS current_name, i.code_user AS current_code, i.fan,
+        di.category, di.returned_at
+        FROM discharges d JOIN inventory i ON i.id = d.computer_id
+        JOIN discharge_items di ON di.discharge_id = d.id
+        WHERE di.category IN ('casques', 'telephones', 'disque-sauvegarde')''').fetchall()
+    for row in issued_rows:
+        name = row['recipient_name'] or row['current_name']
+        code = row['recipient_code'] or row['current_code']
+        person = get_person(name, row['fan'], code)
+        if not person:
+            continue
+        category = row['category']
+        person['issue_counts'][category] = person['issue_counts'].get(category, 0) + 1
+        if row['returned_at']:
+            person['returned_counts'][category] = person['returned_counts'].get(category, 0) + 1
+
+    returned_rows = db.execute('''SELECT r.recipient_name, r.recipient_code,
+        i.username AS current_name, i.code_user AS current_code, i.fan, ri.category, COUNT(*) AS quantity
+        FROM restitutions r JOIN inventory i ON i.id = r.computer_id
+        JOIN restitution_items ri ON ri.restitution_id = r.id
+        WHERE ri.category IN ('casques', 'telephones', 'disque-sauvegarde')
+        GROUP BY r.id, ri.category''').fetchall()
+    for row in returned_rows:
+        name = row['recipient_name'] or row['current_name']
+        code = row['recipient_code'] or row['current_code']
+        person = get_person(name, row['fan'], code)
+        if person:
+            category = row['category']
+            person['restitution_counts'][category] = person['restitution_counts'].get(category, 0) + row['quantity']
+
+    results = []
+    for person in people.values():
+        for slug in equipment:
+            person['issue_counts'][slug] = max(
+                person['issue_counts'].get(slug, 0),
+                person['restitution_counts'].get(slug, 0),
+            )
+        return_counts = {
+            slug: max(person['returned_counts'].get(slug, 0), person['restitution_counts'].get(slug, 0))
+            for slug in equipment
+        }
+        active_categories = {
+            slug for slug, count in person['issue_counts'].items()
+            if count > return_counts.get(slug, 0)
+        }
+        if not person['current'] and not active_categories:
+            continue
+        missing = [
+            {'slug': slug, 'label': label}
+            for slug, label in equipment.items()
+            if not person['issue_counts'].get(slug, 0)
+        ]
+        issued = []
+        for slug, label in equipment.items():
+            if person['issue_counts'].get(slug, 0):
+                statuses = []
+                if slug in active_categories:
+                    statuses.append('En dotation')
+                if return_counts.get(slug, 0):
+                    statuses.append('Restitué')
+                issued.append({'slug': slug, 'label': label, 'statuses': statuses})
+        if missing:
+            results.append({
+                'full_name': person['full_name'] or 'Nom non renseigné',
+                'fan': person['fan'] or '—',
+                'code_user': person['code_user'] or '—',
+                'missing': missing,
+                'issued': issued,
+            })
+
+    results.sort(key=lambda person: person['full_name'].casefold())
+    return jsonify({
+        'employees_scanned': sum(1 for person in people.values() if person['current'] or any(
+            count > max(person['returned_counts'].get(slug, 0), person['restitution_counts'].get(slug, 0))
+            for slug, count in person['issue_counts'].items()
+        )),
+        'employees_with_missing': len(results),
+        'employees': results,
+    })
 
 
 # ---------------------------------------------------------------------------
