@@ -25,10 +25,11 @@
             <div class="navbar-actions">
                 {% if current_user %}
                 <span class="navbar-badge">{{ current_user.username }}</span>
+                <a class="dashboard-nav-link" href="{{ url_for('inventory.computer_models') }}">Ordinateurs</a>
                 <div class="accessories-menu">
                     <a href="#" class="accessories-trigger" onclick="return false;">Accessoires</a>
                     <div class="accessories-dropdown">
-                        {% for slug, label in [('disque-sauvegarde', 'Disque sauvegarde'), ('casques', 'Casques'), ('clavier', 'Clavier'), ('souris', 'Souris')] %}
+                        {% for slug, label in [('disque-sauvegarde', 'Disque sauvegarde'), ('casques', 'Casques'), ('clavier', 'Clavier'), ('souris', 'Souris'), ('telephones', 'Téléphones')] %}
                         <a href="{{ url_for('inventory.accessory_page', category=slug) }}">{{ label }}</a>
                         {% endfor %}
                     </div>

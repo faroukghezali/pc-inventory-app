@@ -112,7 +112,7 @@
                   {% set good = (value == 'Oui' if key not in ['ports_usb', 'batterie'] else (value == 'Toutes' if key == 'ports_usb' else (value is not none and value|int >= 50))) %}
                   {% if not good %}{% set ns.non_count = ns.non_count + 1 %}{% set ns.all_good = false %}{% endif %}
                 {% endfor %}
-                {% if ns.non_count == 0 and ns.all_good %}{% set health='good' %}{% elif ns.non_count == 2 %}{% set health='warning' %}{% elif ns.non_count > 2 %}{% set health='bad' %}{% else %}{% set health='neutral' %}{% endif %}
+                {% if ns.non_count == 0 and ns.all_good %}{% set health='good' %}{% elif ns.non_count > 0 %}{% set health='warning' %}{% else %}{% set health='neutral' %}{% endif %}
                 {% if   s == 'En stock'                 %}{% set rc='row-en-stock' %}{% set bc='badge-en-stock' %}
                 {% elif s == 'Utilisation hors domaine' %}{% set rc='row-hors'     %}{% set bc='badge-hors'     %}
                 {% elif s == 'Free'                     %}{% set rc='row-free'     %}{% set bc='badge-free'     %}

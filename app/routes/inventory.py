@@ -89,36 +89,69 @@ COMPONENT_ICONS = {
 
 ACCESSORY_CATEGORIES = {
     'disque-sauvegarde': 'Disque sauvegarde', 'casques': 'Casques',
-    'clavier': 'Clavier', 'souris': 'Souris',
+    'clavier': 'Clavier', 'souris': 'Souris', 'telephones': 'Téléphones',
 }
+
+
+def accessory_category_name(category):
+    """Name a known category, or an additional category already in inventory."""
+    if category in ACCESSORY_CATEGORIES:
+        return ACCESSORY_CATEGORIES[category]
+    exists = get_db().execute(
+        'SELECT 1 FROM accessories WHERE category = ? LIMIT 1', (category,)
+    ).fetchone()
+    if not exists:
+        return None
+    return category.replace('-', ' ').replace('_', ' ').title()
 
 
 @inventory_bp.route('/accessoires/<category>')
 def accessory_page(category):
-    if category not in ACCESSORY_CATEGORIES:
+    category_name = accessory_category_name(category)
+    if not category_name:
         return redirect(url_for('inventory.index'))
-    rows = get_db().execute('SELECT id, brand, accessory_type, serial_number, created_at FROM accessories WHERE category = ? AND discharge_id IS NULL ORDER BY brand COLLATE NOCASE, id', (category,)).fetchall()
+    rows = get_db().execute('''SELECT id, brand, accessory_type, serial_number, phone_model, ram, storage,
+        technical_details, created_at FROM accessories WHERE category = ? AND discharge_id IS NULL
+        ORDER BY brand COLLATE NOCASE, phone_model COLLATE NOCASE, id''', (category,)).fetchall()
     brands = sorted({row['brand'] for row in rows}, key=str.casefold)
-    return render_template('accessories.html', category=category, category_name=ACCESSORY_CATEGORIES[category], rows=rows, brands=brands, total=len(rows))
+    return render_template('accessories.html', category=category, category_name=category_name, rows=rows, brands=brands, total=len(rows))
 
 
 @inventory_bp.route('/accessoires/<category>/add', methods=['POST'])
 def accessory_add(category):
-    if category not in ACCESSORY_CATEGORIES:
+    category_name = accessory_category_name(category)
+    if not category_name:
         return redirect(url_for('inventory.index'))
     brand = request.form.get('brand', '').strip()
-    accessory_type = request.form.get('accessory_type', '')
+    is_phone = category == 'telephones'
+    accessory_type = 'Téléphone' if is_phone else request.form.get('accessory_type', '')
     serial_number = request.form.get('serial_number', '').strip() or None
+    phone_model = request.form.get('phone_model', '').strip() if is_phone else None
+    ram = request.form.get('ram', '').strip() if is_phone else None
+    storage = request.form.get('storage', '').strip() if is_phone else None
+    technical_details = request.form.get('technical_details', '').strip() if is_phone else None
     try:
         quantity = int(request.form.get('quantity', '0'))
     except ValueError:
         quantity = 0
-    if not brand or len(brand) > 100 or accessory_type not in {'USB/type-C', 'Bleutooth', 'USB', 'Type-C'} or quantity < 1 or quantity > 10000:
-        flash('Saisissez une marque et une quantité entre 1 et 10 000.', 'error')
+    invalid_phone = is_phone and (
+        not phone_model or len(phone_model) > 100 or len(ram) > 60 or len(storage) > 60 or
+        len(technical_details) > 500 or (serial_number and quantity != 1)
+    )
+    if not brand or len(brand) > 100 or (not is_phone and accessory_type not in {'USB/type-C', 'Bleutooth', 'USB', 'Type-C'}) or invalid_phone or quantity < 1 or quantity > 10000:
+        if invalid_phone and serial_number and quantity != 1:
+            flash('Pour saisir un numéro de série, la quantité doit être égale à 1.', 'error')
+        elif invalid_phone:
+            flash('Renseignez le modèle du téléphone et vérifiez les limites des champs.', 'error')
+        else:
+            flash('Saisissez une marque et une quantité entre 1 et 10 000.', 'error')
     else:
-        get_db().executemany('INSERT INTO accessories (category, brand, accessory_type, serial_number) VALUES (?, ?, ?, ?)', [(category, brand, accessory_type, serial_number)] * quantity)
+        get_db().executemany('''INSERT INTO accessories
+            (category, brand, accessory_type, serial_number, phone_model, ram, storage, technical_details)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            [(category, brand, accessory_type, serial_number, phone_model, ram, storage, technical_details)] * quantity)
         get_db().commit()
-        flash(f'{quantity} article(s) {ACCESSORY_CATEGORIES[category]} ajouté(s).', 'success')
+        flash(f'{quantity} article(s) {category_name} ajouté(s).', 'success')
     return redirect(url_for('inventory.accessory_page', category=category))
 
 
@@ -128,8 +161,21 @@ def accessory_update(category):
     brand = request.form.get('brand', '').strip()
     accessory_type = request.form.get('accessory_type', '')
     serial_number = request.form.get('serial_number', '').strip() or None
-    if category not in ACCESSORY_CATEGORIES or not item_id or not brand or len(brand) > 100 or accessory_type not in {'USB/type-C', 'Bleutooth', 'USB', 'Type-C'}:
+    is_phone = category == 'telephones'
+    phone_model = request.form.get('phone_model', '').strip() if is_phone else None
+    ram = request.form.get('ram', '').strip() if is_phone else None
+    storage = request.form.get('storage', '').strip() if is_phone else None
+    technical_details = request.form.get('technical_details', '').strip() if is_phone else None
+    invalid_phone = is_phone and (not phone_model or len(phone_model) > 100 or len(ram) > 60 or len(storage) > 60 or len(technical_details) > 500)
+    if not accessory_category_name(category) or not item_id or not brand or len(brand) > 100 or invalid_phone or (not is_phone and accessory_type not in {'USB/type-C', 'Bleutooth', 'USB', 'Type-C'}):
         flash('Marque invalide.', 'error')
+    elif is_phone:
+        get_db().execute('''UPDATE accessories SET brand = ?, accessory_type = 'Téléphone', serial_number = ?,
+            phone_model = ?, ram = ?, storage = ?, technical_details = ?
+            WHERE id = ? AND category = ? AND discharge_id IS NULL''',
+            (brand, serial_number, phone_model, ram, storage, technical_details, item_id, category))
+        get_db().commit()
+        flash('Téléphone modifié.', 'success')
     else:
         get_db().execute('UPDATE accessories SET brand = ?, accessory_type = ?, serial_number = ? WHERE id = ? AND category = ? AND discharge_id IS NULL', (brand, accessory_type, serial_number, item_id, category))
         get_db().commit()
@@ -140,7 +186,7 @@ def accessory_update(category):
 @inventory_bp.route('/accessoires/<category>/delete', methods=['POST'])
 def accessory_delete(category):
     ids = [int(value) for value in request.form.getlist('ids') if value.isdigit()]
-    if category in ACCESSORY_CATEGORIES and ids:
+    if accessory_category_name(category) and ids:
         get_db().executemany('DELETE FROM accessories WHERE id = ? AND category = ? AND discharge_id IS NULL', [(item_id, category) for item_id in ids])
         get_db().commit()
         flash(f'{len(ids)} article(s) supprimé(s).', 'success')
@@ -149,29 +195,34 @@ def accessory_delete(category):
 
 @inventory_bp.route('/decharges')
 def discharge_index():
-    records = get_db().execute("""SELECT i.id, i.model_name, i.fan, i.sn, i.username, i.code_user, i.statut,
-        (SELECT d.issued_at FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1) AS issued_at,
-        COALESCE(i.username, (SELECT d.recipient_name FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1)) AS display_user,
-        COALESCE(i.code_user, (SELECT d.recipient_code FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1)) AS display_code,
-        (SELECT GROUP_CONCAT(category || ': ' || brand, ', ') FROM discharge_items di
-            JOIN discharges d ON d.id=di.discharge_id WHERE d.computer_id=i.id
-            AND d.id=(SELECT MAX(d2.id) FROM discharges d2 WHERE d2.computer_id=i.id)) AS taken_items
-        FROM inventory i WHERE i.statut IN ('Affecter', 'Utilisation hors domaine')
-        OR EXISTS (SELECT 1 FROM discharges dx JOIN discharge_items di ON di.discharge_id=dx.id
-            WHERE dx.computer_id=i.id AND di.returned_at IS NULL) ORDER BY i.id DESC""").fetchall()
-    return render_template('discharge_list.html', records=records)
+    db = get_db()
+    records = db.execute("""SELECT d.id AS discharge_id, d.document_type, d.issued_at,
+        COALESCE(d.recipient_name, i.username) AS display_user,
+        COALESCE(d.recipient_code, i.code_user) AS display_code,
+        i.id AS computer_id, i.fan,
+        GROUP_CONCAT(CASE WHEN di.category = 'telephones' THEN 'Téléphone' ELSE di.category END || ': ' || di.brand || CASE WHEN di.phone_model IS NOT NULL THEN ' ' || di.phone_model ELSE '' END, ', ') AS taken_items
+        FROM discharges d JOIN inventory i ON i.id=d.computer_id
+        JOIN discharge_items di ON di.discharge_id=d.id AND di.returned_at IS NULL
+        GROUP BY d.id ORDER BY d.id DESC""").fetchall()
+    employees = db.execute("""SELECT id, model_name, fan, username, code_user FROM inventory
+        WHERE statut IN ('Affecter', 'Utilisation hors domaine') AND
+        (COALESCE(username, '') <> '' OR COALESCE(code_user, '') <> '')
+        ORDER BY COALESCE(username, code_user) COLLATE NOCASE, id""").fetchall()
+    return render_template('discharge_list.html', records=records, employees=employees)
 
 
 @inventory_bp.route('/restitutions')
 def restitution_index():
-    records = get_db().execute("""SELECT i.id, i.model_name, i.fan, i.sn, i.username, i.code_user, i.statut,
-        (SELECT d.issued_at FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1) AS issued_at,
-        COALESCE(i.username, (SELECT d.recipient_name FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1)) AS display_user,
-        COALESCE(i.code_user, (SELECT d.recipient_code FROM discharges d WHERE d.computer_id=i.id ORDER BY d.id DESC LIMIT 1)) AS display_code,
-        (SELECT GROUP_CONCAT(di.category || ': ' || di.brand, ', ') FROM discharge_items di
-            JOIN discharges d ON d.id=di.discharge_id WHERE d.computer_id=i.id AND di.returned_at IS NULL) AS taken_items
-        FROM inventory i WHERE EXISTS (SELECT 1 FROM discharges dx JOIN discharge_items di ON di.discharge_id=dx.id
-            WHERE dx.computer_id=i.id AND di.returned_at IS NULL) ORDER BY i.id DESC""").fetchall()
+    records = get_db().execute("""SELECT r.id AS restitution_id, r.created_at AS issued_at,
+        COALESCE(r.recipient_name, i.last_recipient, i.username,
+            (SELECT d.recipient_name FROM discharges d WHERE d.computer_id=r.computer_id ORDER BY d.id DESC LIMIT 1)) AS display_user,
+        COALESCE(r.recipient_code, i.code_user,
+            (SELECT d.recipient_code FROM discharges d WHERE d.computer_id=r.computer_id ORDER BY d.id DESC LIMIT 1)) AS display_code,
+        r.computer_returned, i.fan,
+        GROUP_CONCAT(CASE WHEN ri.category = 'telephones' THEN 'Téléphone' ELSE ri.category END || ': ' || ri.brand || CASE WHEN ri.phone_model IS NOT NULL THEN ' ' || ri.phone_model ELSE '' END, ', ') AS returned_items
+        FROM restitutions r JOIN inventory i ON i.id=r.computer_id
+        LEFT JOIN restitution_items ri ON ri.restitution_id=r.id
+        GROUP BY r.id ORDER BY r.id DESC""").fetchall()
     return render_template('discharge_list.html', records=records, movement='restitution')
 
 
@@ -184,17 +235,19 @@ def discharge_document(item_id):
         return redirect(url_for('inventory.discharge_index'))
     categories = {
         'casques': 'Casque', 'souris': 'Souris', 'clavier': 'Clavier',
-        'disque-sauvegarde': 'Disque de sauvegarde',
+        'disque-sauvegarde': 'Disque de sauvegarde', 'telephones': 'Téléphone',
     }
     accessories = {}
     for slug, label in categories.items():
-        accessories[slug] = get_db().execute('''SELECT brand, COUNT(*) AS total_quantity,
-            SUM(CASE WHEN discharge_id IS NULL THEN 1 ELSE 0 END) AS available_quantity
-            FROM accessories WHERE category = ? GROUP BY brand ORDER BY brand COLLATE NOCASE''', (slug,)).fetchall()
-    latest = get_db().execute('SELECT id, recipient_name FROM discharges WHERE computer_id = ? AND assignment_number = ? ORDER BY id DESC LIMIT 1', (item_id, item.get('assignment_number', 0))).fetchone()
-    issued = get_db().execute('SELECT category, brand, serial_number FROM discharge_items WHERE discharge_id = ? ORDER BY category, id', (latest['id'],)).fetchall() if latest else []
-    returned = get_db().execute('SELECT category, brand, serial_number FROM restitution_items WHERE restitution_id = (SELECT id FROM restitutions WHERE computer_id = ? ORDER BY id DESC LIMIT 1) ORDER BY id', (item_id,)).fetchall()
-    return render_template('discharge.html', item=item, accessories=accessories, categories=categories, issued=issued, returned=returned, today=date.today().strftime('%d/%m/%Y'))
+        if slug == 'telephones':
+            accessories[slug] = get_db().execute('''SELECT id, brand, phone_model, ram, storage, serial_number,
+                CASE WHEN discharge_id IS NULL THEN 1 ELSE 0 END AS available_quantity
+                FROM accessories WHERE category = ? ORDER BY brand COLLATE NOCASE, phone_model COLLATE NOCASE, id''', (slug,)).fetchall()
+        else:
+            accessories[slug] = get_db().execute('''SELECT brand, COUNT(*) AS total_quantity,
+                SUM(CASE WHEN discharge_id IS NULL THEN 1 ELSE 0 END) AS available_quantity
+                FROM accessories WHERE category = ? GROUP BY brand ORDER BY brand COLLATE NOCASE''', (slug,)).fetchall()
+    return render_template('discharge.html', item=item, accessories=accessories, categories=categories, today=date.today().strftime('%d/%m/%Y'))
 
 
 @inventory_bp.route('/decharge/<int:item_id>/confirm', methods=['POST'])
@@ -203,23 +256,39 @@ def discharge_confirm(item_id):
     if not item or item.get('statut') not in {'Affecter', 'Utilisation hors domaine'}:
         flash('Ordinateur non admissible pour une décharge.', 'error')
         return redirect(url_for('inventory.discharge_index'))
-    categories = ['casques', 'souris', 'clavier', 'disque-sauvegarde']
+    categories = ['casques', 'souris', 'clavier', 'disque-sauvegarde', 'telephones']
     db = get_db()
+    discharge_id = None
+    saved = False
     try:
         db.execute('BEGIN IMMEDIATE')
         selected = [(category, request.form.get(f'brand_{category}', '').strip()) for category in categories if request.form.get(f'brand_{category}', '').strip()]
         if not selected:
             raise ValueError('Sélectionnez au moins un accessoire avant de valider la décharge.')
-        discharge_id = db.execute('INSERT INTO discharges (computer_id, recipient_name, recipient_code, assignment_number) VALUES (?, ?, ?, ?)', (item_id, item.get('username'), item.get('code_user'), item.get('assignment_number', 0))).lastrowid
-        for category, brand in selected:
-            cursor = db.execute('''UPDATE accessories SET discharge_id = ? WHERE id = (
-                SELECT id FROM accessories WHERE category = ? AND brand = ? AND discharge_id IS NULL ORDER BY id LIMIT 1
-            ) AND discharge_id IS NULL''', (discharge_id, category, brand))
+        discharge_id = db.execute("INSERT INTO discharges (computer_id, recipient_name, recipient_code, assignment_number, document_type) VALUES (?, ?, ?, ?, 'computer')", (item_id, item.get('username'), item.get('code_user'), item.get('assignment_number', 0))).lastrowid
+        for category, value in selected:
+            if category == 'telephones':
+                phone_id = int(value) if value.isdigit() else 0
+                cursor = db.execute('UPDATE accessories SET discharge_id = ? WHERE id = ? AND category = ? AND discharge_id IS NULL', (discharge_id, phone_id, category))
+                accessory = db.execute('''SELECT id, brand, serial_number, phone_model, ram, storage, technical_details
+                    FROM accessories WHERE id = ? AND discharge_id = ?''', (phone_id, discharge_id)).fetchone()
+                brand = accessory['brand'] if accessory else value
+            else:
+                brand = value
+                cursor = db.execute('''UPDATE accessories SET discharge_id = ? WHERE id = (
+                    SELECT id FROM accessories WHERE category = ? AND brand = ? AND discharge_id IS NULL ORDER BY id LIMIT 1
+                ) AND discharge_id IS NULL''', (discharge_id, category, brand))
+                accessory = db.execute('''SELECT id, brand, serial_number, phone_model, ram, storage, technical_details
+                    FROM accessories WHERE category = ? AND brand = ? AND discharge_id = ? ORDER BY id DESC LIMIT 1''', (category, brand, discharge_id)).fetchone()
             if cursor.rowcount != 1:
                 raise ValueError(f'Rupture de stock pour {ACCESSORY_CATEGORIES[category]} — {brand}.')
-            accessory = db.execute('SELECT id, serial_number FROM accessories WHERE category = ? AND brand = ? AND discharge_id = ? ORDER BY id DESC LIMIT 1', (category, brand, discharge_id)).fetchone()
-            db.execute('INSERT INTO discharge_items (discharge_id, accessory_id, category, brand, serial_number) VALUES (?, ?, ?, ?, ?)', (discharge_id, accessory['id'], category, brand, accessory['serial_number']))
+            db.execute('''INSERT INTO discharge_items
+                (discharge_id, accessory_id, category, brand, serial_number, phone_model, ram, storage, technical_details)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (discharge_id, accessory['id'], category, brand, accessory['serial_number'], accessory['phone_model'],
+                 accessory['ram'], accessory['storage'], accessory['technical_details']))
         db.commit()
+        saved = True
         flash('Accessoires attribués et décharge enregistrée.', 'success')
     except ValueError as error:
         db.rollback()
@@ -227,7 +296,75 @@ def discharge_confirm(item_id):
     except sqlite3.Error:
         db.rollback()
         flash('Impossible d’enregistrer la décharge. Réessayez.', 'error')
+    if saved:
+        return redirect(url_for('inventory.discharge_record_document', discharge_id=discharge_id))
     return redirect(url_for('inventory.discharge_document', item_id=item_id))
+
+
+@inventory_bp.route('/decharge/accessoires/<int:item_id>')
+def accessory_discharge(item_id):
+    item = get_item_by_id(item_id)
+    if not item or item.get('statut') not in {'Affecter', 'Utilisation hors domaine'}:
+        flash('Sélectionnez un employé actuellement affecté à un ordinateur.', 'error')
+        return redirect(url_for('inventory.discharge_index'))
+    stock = get_db().execute('''SELECT id, category, brand, accessory_type, serial_number, phone_model, ram, storage, technical_details FROM accessories
+        WHERE discharge_id IS NULL ORDER BY category, brand COLLATE NOCASE, id''').fetchall()
+    labels = {'casques': 'Casque', 'souris': 'Souris', 'clavier': 'Clavier', 'disque-sauvegarde': 'Disque de sauvegarde', 'telephones': 'Téléphone'}
+    return render_template('accessory_discharge.html', item=item, stock=stock, categories=labels, today=date.today().strftime('%d/%m/%Y'))
+
+
+@inventory_bp.route('/decharge/accessoires/<int:item_id>/confirm', methods=['POST'])
+def accessory_discharge_confirm(item_id):
+    item = get_item_by_id(item_id)
+    if not item or item.get('statut') not in {'Affecter', 'Utilisation hors domaine'}:
+        flash('Employé ou ordinateur non admissible pour une décharge.', 'error')
+        return redirect(url_for('inventory.discharge_index'))
+    accessory_ids = list(dict.fromkeys(int(value) for value in request.form.getlist('accessory_ids') if value.isdigit()))
+    if not accessory_ids:
+        flash('Sélectionnez au moins un accessoire.', 'error')
+        return redirect(url_for('inventory.accessory_discharge', item_id=item_id))
+    db = get_db()
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        placeholders = ','.join('?' for _ in accessory_ids)
+        selected = db.execute(f'''SELECT id, category, brand, serial_number, phone_model, ram, storage, technical_details FROM accessories
+            WHERE id IN ({placeholders}) AND discharge_id IS NULL ORDER BY id''', accessory_ids).fetchall()
+        if len(selected) != len(accessory_ids):
+            raise ValueError('Un ou plusieurs accessoires ne sont plus disponibles. Actualisez la page et réessayez.')
+        discharge_id = db.execute("""INSERT INTO discharges
+            (computer_id, recipient_name, recipient_code, assignment_number, document_type)
+            VALUES (?, ?, ?, ?, 'accessories')""",
+            (item_id, item.get('username'), item.get('code_user'), item.get('assignment_number', 0))).lastrowid
+        for accessory in selected:
+            changed = db.execute('UPDATE accessories SET discharge_id = ? WHERE id = ? AND discharge_id IS NULL', (discharge_id, accessory['id']))
+            if changed.rowcount != 1:
+                raise ValueError('Un accessoire vient d’être attribué. Actualisez la page et réessayez.')
+            db.execute('''INSERT INTO discharge_items
+                (discharge_id, accessory_id, category, brand, serial_number, phone_model, ram, storage, technical_details)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (discharge_id, accessory['id'], accessory['category'], accessory['brand'], accessory['serial_number'],
+                 accessory['phone_model'], accessory['ram'], accessory['storage'], accessory['technical_details']))
+        db.commit()
+        flash('Décharge des accessoires enregistrée.', 'success')
+        return redirect(url_for('inventory.discharge_record_document', discharge_id=discharge_id))
+    except (sqlite3.Error, ValueError) as error:
+        db.rollback()
+        flash(str(error) if isinstance(error, ValueError) else 'Impossible d’enregistrer la décharge. Réessayez.', 'error')
+        return redirect(url_for('inventory.accessory_discharge', item_id=item_id))
+
+
+@inventory_bp.route('/decharge/document/<int:discharge_id>')
+def discharge_record_document(discharge_id):
+    db = get_db()
+    record = db.execute('''SELECT d.id, d.document_type, d.issued_at, d.recipient_name, d.recipient_code,
+        i.model_name, i.fan, i.sn FROM discharges d JOIN inventory i ON i.id=d.computer_id WHERE d.id=?''', (discharge_id,)).fetchone()
+    if not record:
+        flash('Cette décharge est introuvable.', 'error')
+        return redirect(url_for('inventory.discharge_index'))
+    issued = db.execute('SELECT category, brand, serial_number, phone_model, ram, storage, technical_details FROM discharge_items WHERE discharge_id=? ORDER BY id', (discharge_id,)).fetchall()
+    categories = {'casques': 'Casque', 'souris': 'Souris', 'clavier': 'Clavier', 'disque-sauvegarde': 'Disque de sauvegarde', 'telephones': 'Téléphone'}
+    return render_template('discharge_record.html', record=record, issued=issued, categories=categories,
+                           today=date.today().strftime('%d/%m/%Y'))
 
 
 @inventory_bp.route('/restitution/<int:item_id>', methods=['GET', 'POST'])
@@ -237,46 +374,121 @@ def restitution_document(item_id):
         return redirect(url_for('inventory.discharge_index'))
     db = get_db()
     if request.method == 'POST':
+        if request.form.get('confirm_return') != 'yes':
+            flash('Confirmez explicitement le retour avant de valider.', 'error')
+            return redirect(url_for('inventory.restitution_document', item_id=item_id))
         accessory_ids = [int(value) for value in request.form.getlist('accessory_ids') if value.isdigit()]
-        if not accessory_ids:
-            flash('Sélectionnez au moins un accessoire avant de confirmer le retour.', 'error')
+        if not accessory_ids and item.get('statut') != 'En stock':
+            flash('Sélectionnez au moins un accessoire retourné.', 'error')
             return redirect(url_for('inventory.restitution_document', item_id=item_id))
         try:
             db.execute('BEGIN IMMEDIATE')
-            restitution_id = db.execute('INSERT INTO restitutions (computer_id) VALUES (?)', (item_id,)).lastrowid
-            for accessory_id in accessory_ids:
-                event = db.execute('''SELECT di.category, di.brand, di.serial_number, di.discharge_id
+            valid_events = []
+            for accessory_id in dict.fromkeys(accessory_ids):
+                event = db.execute('''SELECT di.category, di.brand, di.serial_number, di.discharge_id,
+                    di.phone_model, di.ram, di.storage, di.technical_details
                     FROM discharge_items di JOIN accessories a ON a.id = di.accessory_id
                     JOIN discharges d ON d.id = di.discharge_id
                     WHERE di.accessory_id = ? AND di.returned_at IS NULL AND a.discharge_id = di.discharge_id AND d.computer_id = ?''', (accessory_id, item_id)).fetchone()
                 if not event:
                     continue
+                valid_events.append((accessory_id, event))
+            if accessory_ids and not valid_events:
+                raise ValueError('Aucun des accessoires sélectionnés n’est encore en attente de restitution.')
+            previous_discharge = db.execute('''SELECT recipient_name, recipient_code FROM discharges
+                WHERE computer_id=? ORDER BY id DESC LIMIT 1''', (item_id,)).fetchone()
+            recipient_name = (previous_discharge['recipient_name'] if previous_discharge else None) or item.get('last_recipient') or item.get('username')
+            recipient_code = (previous_discharge['recipient_code'] if previous_discharge else None) or item.get('code_user')
+            restitution_id = db.execute('''INSERT INTO restitutions
+                (computer_id, recipient_name, recipient_code, computer_returned) VALUES (?, ?, ?, ?)''',
+                (item_id, recipient_name, recipient_code, int(item.get('statut') == 'En stock'))).lastrowid
+            for accessory_id, event in valid_events:
                 db.execute('UPDATE accessories SET discharge_id = NULL WHERE id = ?', (accessory_id,))
                 db.execute('UPDATE discharge_items SET returned_at = CURRENT_TIMESTAMP WHERE accessory_id = ? AND returned_at IS NULL', (accessory_id,))
-                db.execute('INSERT INTO restitution_items (restitution_id, category, brand, serial_number) VALUES (?, ?, ?, ?)', (restitution_id, event['category'], event['brand'], event['serial_number']))
+                db.execute('''INSERT INTO restitution_items
+                    (restitution_id, category, brand, serial_number, phone_model, ram, storage, technical_details)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (restitution_id, event['category'], event['brand'], event['serial_number'], event['phone_model'],
+                     event['ram'], event['storage'], event['technical_details']))
             db.commit()
             flash('Retour enregistré et stock mis à jour.', 'success')
+        except ValueError as error:
+            db.rollback()
+            flash(str(error), 'error')
         except (sqlite3.Error, TypeError):
             db.rollback()
             flash('Impossible d’enregistrer ce retour.', 'error')
         return redirect(url_for('inventory.restitution_document', item_id=item_id))
-    outstanding = db.execute('''SELECT di.accessory_id, di.category, di.brand, di.serial_number FROM discharge_items di
+    outstanding = db.execute('''SELECT di.accessory_id, di.category, di.brand, di.serial_number,
+        di.phone_model, di.ram, di.storage, di.technical_details FROM discharge_items di
         JOIN discharges d ON d.id = di.discharge_id WHERE d.computer_id = ? AND di.returned_at IS NULL ORDER BY di.id''', (item_id,)).fetchall()
-    returned = db.execute('SELECT category, brand, serial_number FROM restitution_items WHERE restitution_id = (SELECT id FROM restitutions WHERE computer_id = ? ORDER BY id DESC LIMIT 1) ORDER BY id', (item_id,)).fetchall()
+    returned = db.execute('''SELECT category, brand, serial_number, phone_model, ram, storage, technical_details
+        FROM restitution_items WHERE restitution_id = (SELECT id FROM restitutions WHERE computer_id = ? ORDER BY id DESC LIMIT 1) ORDER BY id''', (item_id,)).fetchall()
     previous_recipient = db.execute('SELECT recipient_name FROM discharges WHERE computer_id = ? ORDER BY id DESC LIMIT 1', (item_id,)).fetchone()
     recipient_name = (previous_recipient['recipient_name'] if previous_recipient and previous_recipient['recipient_name'] else None) or item.get('last_recipient') or item.get('username')
     return render_template('restitution.html', item=item, outstanding=outstanding, returned=returned, recipient_name=recipient_name, today=date.today().strftime('%d/%m/%Y'))
+
+
+@inventory_bp.route('/restitution/document/<int:restitution_id>')
+def restitution_record_document(restitution_id):
+    db = get_db()
+    record = db.execute('''SELECT r.id, r.created_at, r.recipient_name, r.recipient_code,
+        r.computer_returned, i.model_name, i.fan, i.sn
+        FROM restitutions r JOIN inventory i ON i.id=r.computer_id WHERE r.id=?''', (restitution_id,)).fetchone()
+    if not record:
+        flash('Cette restitution est introuvable.', 'error')
+        return redirect(url_for('inventory.restitution_index'))
+    returned = db.execute('''SELECT category, brand, serial_number, phone_model, ram, storage, technical_details FROM restitution_items
+        WHERE restitution_id=? ORDER BY id''', (restitution_id,)).fetchall()
+    return render_template('restitution_record.html', record=record, returned=returned,
+                           today=date.today().strftime('%d/%m/%Y'))
 
 
 # ---------------------------------------------------------------------------
 # Dashboard
 # ---------------------------------------------------------------------------
 
-@inventory_bp.route('/')
-def index():
-    models = get_all_models()
-    total_pcs = get_total_count()
-    return render_template('index.html', models=models, total_pcs=total_pcs)
+@inventory_bp.route('/', endpoint='index')
+@inventory_bp.route('/dashboard')
+def equipment_dashboard():
+    """Centralized equipment directory, populated from the live inventory."""
+    db = get_db()
+    categories = db.execute('''
+        SELECT category, COUNT(*) AS total_count
+        FROM accessories
+        WHERE discharge_id IS NULL
+        GROUP BY category
+        ORDER BY category COLLATE NOCASE
+    ''').fetchall()
+    category_counts = {row['category']: row['total_count'] for row in categories}
+    known_categories = [
+        {'slug': slug, 'name': label, 'total_count': category_counts.pop(slug, 0)}
+        for slug, label in [
+            ('casques', 'Casques'),
+            ('souris', 'Souris'),
+            ('clavier', 'Claviers'),
+            ('disque-sauvegarde', 'Disques de sauvegarde'),
+            ('telephones', 'Téléphones'),
+        ]
+    ]
+    accessory_categories = known_categories + [{
+        'slug': row['category'],
+        'name': row['category'].replace('-', ' ').replace('_', ' ').title(),
+        'total_count': category_counts[row['category']],
+    } for row in categories if row['category'] in category_counts]
+    return render_template(
+        'equipment_dashboard.html',
+        models=get_all_models(),
+        total_pcs=get_total_count(),
+        accessory_categories=accessory_categories,
+        total_accessories=sum(category['total_count'] for category in accessory_categories),
+    )
+
+
+@inventory_bp.route('/ordinateurs')
+def computer_models():
+    """Show all registered computer models before opening a model inventory."""
+    return render_template('computer_models.html', models=get_all_models())
 
 
 # ---------------------------------------------------------------------------

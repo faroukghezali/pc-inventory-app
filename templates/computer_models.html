@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Ordinateurs – IT Inventory{% endblock %}
+{% block content %}
+<section class="equipment-dashboard model-directory page-fade">
+  <div class="model-directory-actions">
+    <a class="btn btn-secondary" href="{{ url_for('inventory.equipment_dashboard') }}">Accueil</a>
+    {% if current_user.access_level in ['write', 'full'] %}<a class="btn btn-primary" href="{{ url_for('inventory.add_item') }}">Ajouter un PC</a>{% endif %}
+    <a class="btn btn-secondary" href="{{ url_for('inventory.preparer_pc') }}">Réparer un PC</a>
+  </div>
+  <section class="equipment-category-grid model-card-grid" aria-label="Modèles d’ordinateurs">
+    {% for model in models %}
+    <a class="equipment-category model-directory-card" href="{{ url_for('inventory.model_detail', slug=model.slug) }}">
+      <span class="equipment-category-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></span>
+      <span class="equipment-category-copy"><strong>{{ model.name }}</strong><small>{{ model.total_count }} ordinateur(s) enregistré(s)</small></span>
+    </a>
+    {% else %}
+    <div class="model-directory-empty">
+      <span class="equipment-category-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></span>
+      <strong>Aucun modèle enregistré</strong>
+      <span>Ajoutez un ordinateur pour créer le premier modèle.</span>
+      {% if current_user.access_level in ['write', 'full'] %}<a class="equipment-home-link" href="{{ url_for('inventory.add_item') }}">Ajouter un PC</a>{% endif %}
+    </div>
+    {% endfor %}
+  </section>
+</section>
+{% endblock %}

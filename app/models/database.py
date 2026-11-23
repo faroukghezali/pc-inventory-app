@@ -92,6 +92,9 @@ def init_db():
         conn.execute('ALTER TABLE accessories ADD COLUMN serial_number TEXT')
     if 'discharge_id' not in accessory_columns:
         conn.execute('ALTER TABLE accessories ADD COLUMN discharge_id INTEGER')
+    for col in ('phone_model', 'ram', 'storage', 'technical_details'):
+        if col not in accessory_columns:
+            conn.execute(f'ALTER TABLE accessories ADD COLUMN {col} TEXT')
     conn.execute('''CREATE TABLE IF NOT EXISTS discharges (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         computer_id INTEGER NOT NULL,
@@ -106,6 +109,8 @@ def init_db():
         conn.execute('ALTER TABLE discharges ADD COLUMN recipient_name TEXT')
     if 'recipient_code' not in discharge_columns:
         conn.execute('ALTER TABLE discharges ADD COLUMN recipient_code TEXT')
+    if 'document_type' not in discharge_columns:
+        conn.execute("ALTER TABLE discharges ADD COLUMN document_type TEXT NOT NULL DEFAULT 'computer'")
     conn.execute('''CREATE TABLE IF NOT EXISTS discharge_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         discharge_id INTEGER NOT NULL,
@@ -116,11 +121,22 @@ def init_db():
         returned_at TEXT,
         UNIQUE(discharge_id, accessory_id)
     )''')
+    discharge_item_columns = {r[1] for r in conn.execute('PRAGMA table_info(discharge_items)').fetchall()}
+    for col in ('phone_model', 'ram', 'storage', 'technical_details'):
+        if col not in discharge_item_columns:
+            conn.execute(f'ALTER TABLE discharge_items ADD COLUMN {col} TEXT')
     conn.execute('''CREATE TABLE IF NOT EXISTS restitutions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         computer_id INTEGER NOT NULL,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )''')
+    restitution_columns = {r[1] for r in conn.execute('PRAGMA table_info(restitutions)').fetchall()}
+    if 'recipient_name' not in restitution_columns:
+        conn.execute('ALTER TABLE restitutions ADD COLUMN recipient_name TEXT')
+    if 'recipient_code' not in restitution_columns:
+        conn.execute('ALTER TABLE restitutions ADD COLUMN recipient_code TEXT')
+    if 'computer_returned' not in restitution_columns:
+        conn.execute('ALTER TABLE restitutions ADD COLUMN computer_returned INTEGER NOT NULL DEFAULT 0')
     conn.execute('''CREATE TABLE IF NOT EXISTS restitution_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         restitution_id INTEGER NOT NULL,
@@ -128,6 +144,10 @@ def init_db():
         brand TEXT NOT NULL,
         serial_number TEXT
     )''')
+    restitution_item_columns = {r[1] for r in conn.execute('PRAGMA table_info(restitution_items)').fetchall()}
+    for col in ('phone_model', 'ram', 'storage', 'technical_details'):
+        if col not in restitution_item_columns:
+            conn.execute(f'ALTER TABLE restitution_items ADD COLUMN {col} TEXT')
     conn.execute('''INSERT OR IGNORE INTO discharge_items (discharge_id, accessory_id, category, brand, serial_number)
         SELECT discharge_id, id, category, brand, serial_number FROM accessories WHERE discharge_id IS NOT NULL''')
 
