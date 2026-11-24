@@ -104,6 +104,61 @@ a { color: inherit; text-decoration: none; }
 .file-dropdown a, .file-option { position:relative; display:block; width:100%; padding:.65rem .75rem; border:0; border-radius:.5rem; background:transparent; color:#475569; font:inherit; font-size:.82rem; font-weight:600; text-align:left; cursor:pointer; }
 .file-dropdown a:hover, .file-option:hover { color:#1d4ed8; background:#eff6ff; }
 .file-option input[type=file] { position:absolute; inset:0; width:100%; opacity:0; cursor:pointer; }
+
+/* Excel inventory import */
+.excel-import-page { width:min(1120px, calc(100% - 2rem)); margin:2rem auto 4rem; color:#172b43; }
+.excel-back-link { display:inline-flex; margin-bottom:1.1rem; color:#526783; font-size:.88rem; font-weight:700; }
+.excel-back-link:hover { color:#1679b6; }
+.excel-import-hero { display:flex; align-items:center; justify-content:space-between; gap:1.5rem; margin-bottom:1.4rem; padding:1.8rem 2rem; border:1px solid #244965; border-radius:1.25rem; background:linear-gradient(120deg,#0b1c30,#143b59); color:#f5faff; box-shadow:0 16px 40px rgb(15 37 59 / 14%); }
+.excel-kicker { color:#68cdf5; font-size:.69rem; font-weight:800; letter-spacing:.16em; }
+.excel-hero-copy h1 { margin:.45rem 0 .35rem; font-size:clamp(1.55rem,3vw,2.1rem); letter-spacing:-.035em; }
+.excel-hero-copy p { margin:0; color:#b7c8d9; font-size:.95rem; }
+.excel-template-button,.excel-primary-button,.excel-secondary-button { display:inline-flex; justify-content:center; align-items:center; min-height:2.8rem; padding:.72rem 1rem; border-radius:.7rem; font:inherit; font-size:.86rem; font-weight:750; cursor:pointer; transition:transform .18s ease,box-shadow .18s ease,background .18s ease; }
+.excel-template-button { border:1px solid rgb(125 211 252 / 38%); background:rgb(255 255 255 / 7%); color:#effaff; white-space:nowrap; }
+.excel-template-button:hover { transform:translateY(-1px); background:rgb(255 255 255 / 13%); box-shadow:0 0 20px rgb(56 189 248 / 20%); }
+.excel-import-grid { display:grid; grid-template-columns:1.05fr .95fr; gap:1rem; }
+.excel-panel { border:1px solid #dbe6f0; border-radius:1rem; background:#fff; box-shadow:0 8px 25px rgb(15 39 62 / 5%); }
+.excel-upload-panel,.excel-requirements-panel { padding:1.35rem; }
+.excel-panel-heading { display:flex; align-items:center; gap:.8rem; margin-bottom:1.1rem; }
+.excel-step { display:grid; place-items:center; width:2.35rem; height:2.35rem; flex:0 0 auto; border:1px solid #c8e9f8; border-radius:.75rem; background:#edf9ff; color:#0783bd; font-size:.76rem; font-weight:850; }
+.excel-panel-heading h2,.excel-review-panel h2 { margin:0; color:#152a43; font-size:1.08rem; }
+.excel-panel-heading p { margin:.22rem 0 0; color:#708198; font-size:.8rem; }
+.excel-dropzone { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:12rem; gap:.45rem; padding:1rem; border:1.5px dashed #b6ccdd; border-radius:.9rem; background:#f8fbfe; color:#506780; text-align:center; cursor:pointer; }
+.excel-dropzone:hover { border-color:#51b8e6; background:#f1faff; }
+.excel-dropzone strong { color:#17314d; font-size:.96rem; }
+.excel-dropzone span:not(.excel-upload-icon) { font-size:.8rem; }
+.excel-upload-icon { display:grid; place-items:center; width:2.4rem; height:2.4rem; margin-bottom:.15rem; border-radius:.75rem; background:#def4ff; color:#0987bd; font-size:1.35rem; font-weight:700; }
+.excel-dropzone input { width:100%; max-width:19rem; margin-top:.65rem; color:#526780; font:inherit; font-size:.78rem; }
+.excel-upload-form>.excel-primary-button { width:100%; margin-top:.85rem; }
+.excel-primary-button { border:1px solid #157fbb; background:linear-gradient(110deg,#168ac5,#2472d7); color:#fff; box-shadow:0 5px 14px rgb(37 119 191 / 20%); }
+.excel-primary-button:hover { transform:translateY(-1px); box-shadow:0 8px 20px rgb(37 119 191 / 28%); }
+.excel-secondary-button { border:1px solid #d4e0eb; background:#fff; color:#465b73; }
+.excel-note { color:#8a6224; font-size:.78rem; line-height:1.5; }
+.excel-required-tags { display:flex; flex-wrap:wrap; align-items:center; gap:.45rem; margin:.35rem 0 .8rem; }
+.excel-required-tags span { padding:.38rem .58rem; border:1px solid #cceaf8; border-radius:999px; background:#f0faff; color:#0878ad; font-size:.76rem; font-weight:750; }
+.excel-required-tags em { color:#8392a5; font-size:.72rem; font-style:normal; }
+.excel-requirements-panel>p,.excel-details { color:#667991; font-size:.83rem; line-height:1.6; }
+.excel-details { margin-top:1rem; padding-top:.8rem; border-top:1px solid #e8eef4; }
+.excel-details summary { color:#244563; font-weight:750; cursor:pointer; }
+.excel-details ul { padding-left:1.1rem; }
+.excel-alert { margin:0 0 1rem; padding:.85rem 1rem; border:1px solid #fecaca; border-radius:.75rem; background:#fff5f5; color:#a22e37; font-size:.88rem; }
+.excel-summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; margin:1rem 0; }
+.excel-summary-card { display:flex; flex-direction:column; gap:.3rem; padding:1rem 1.1rem; border:1px solid #dbe6f0; border-radius:.85rem; background:#fff; }
+.excel-summary-card span { color:#74849a; font-size:.75rem; font-weight:650; }
+.excel-summary-card strong { color:#17304a; font-size:1.55rem; }
+.excel-summary-card.is-ready strong { color:#13805a; }
+.excel-summary-card.is-skipped strong { color:#a06b1b; }
+.excel-summary-card.is-rejected strong { color:#ba3d49; }
+.excel-review-panel { margin:1rem 0; padding:1.1rem; }
+.excel-review-panel>p { color:#74849a; font-size:.8rem; }
+.excel-table-scroll { max-height:24rem; overflow:auto; margin-top:.8rem; border:1px solid #e5ebf2; border-radius:.65rem; }
+.excel-review-table { width:100%; border-collapse:collapse; font-size:.78rem; }
+.excel-review-table th { position:sticky; top:0; z-index:1; padding:.68rem .75rem; background:#f1f6fa; color:#536982; text-align:left; white-space:nowrap; }
+.excel-review-table td { max-width:30rem; padding:.62rem .75rem; border-top:1px solid #edf1f5; color:#334960; vertical-align:top; }
+.excel-confirm-row { display:flex; justify-content:flex-end; align-items:center; gap:.7rem; margin-top:1.2rem; }
+.excel-confirm-row form { margin:0; }
+.excel-confirm-row>p { color:#73849a; }
+@media(max-width:760px) { .excel-import-hero { align-items:flex-start; flex-direction:column; padding:1.35rem; } .excel-import-grid { grid-template-columns:1fr; } .excel-summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .excel-confirm-row { align-items:stretch; flex-direction:column-reverse; } .excel-confirm-row>* { width:100%; } }
 .contact-menu { position: relative; }
 .contact-trigger {
   display: grid; place-items: center; width: 2.35rem; height: 2.35rem;
@@ -136,6 +191,14 @@ a { color: inherit; text-decoration: none; }
 .contact-option.btn-logout:hover, .contact-option.btn-logout:focus-visible {
   color: #b91c1c; background: #fff1f2; animation: logout-red-glow 1.5s ease-in-out infinite;
 }
+.helpdesk-menu { position:relative; }
+.helpdesk-menu-trigger { display:grid; place-items:center; width:2.35rem; height:2.35rem; border:1px solid var(--border); border-radius:50%; background:linear-gradient(145deg,#fff,#f0faff); color:#1684ad; cursor:pointer; box-shadow:0 3px 10px rgb(14 165 233 / 7%); transition:all 180ms ease; }
+.helpdesk-menu-trigger svg { width:1.2rem; height:1.2rem; fill:none; stroke:currentColor; stroke-width:1.65; stroke-linecap:round; stroke-linejoin:round; }
+.helpdesk-menu:hover .helpdesk-menu-trigger,.helpdesk-menu:focus-within .helpdesk-menu-trigger { color:#0876a3; border-color:#a5def1; background:#effaff; box-shadow:0 4px 14px rgb(37 148 190 / 17%); transform:translateY(-1px); }
+.helpdesk-menu-dropdown { position:absolute; top:calc(100% + .6rem); right:0; z-index:55; width:13rem; padding:.4rem; border:1px solid #dce8f0; border-radius:.8rem; background:rgb(255 255 255 / 98%); box-shadow:0 14px 35px rgb(15 39 62 / 16%); opacity:0; visibility:hidden; transform:translateY(-5px) scale(.98); transform-origin:top right; transition:opacity 160ms ease,transform 160ms ease,visibility 160ms; backdrop-filter:blur(12px); }
+.helpdesk-menu:hover .helpdesk-menu-dropdown,.helpdesk-menu:focus-within .helpdesk-menu-dropdown { opacity:1; visibility:visible; transform:translateY(0) scale(1); }
+.helpdesk-menu-dropdown a { display:block; padding:.65rem .75rem; border-radius:.5rem; color:#405a72; font-size:.82rem; font-weight:650; }
+.helpdesk-menu-dropdown a:hover,.helpdesk-menu-dropdown a:focus-visible { color:#0879a9; background:#effaff; outline:none; }
 
 /* ── Page content wrapper ─────────────────────────────────── */
 main {
@@ -995,6 +1058,10 @@ main {
 .discharge-search-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(12rem,1fr)); gap:.8rem; margin-bottom:1rem; padding:1rem; border:1px solid #dbeafe; border-radius:.9rem; background:linear-gradient(120deg,#f8fbff,#fff); box-shadow:0 7px 20px rgb(37 99 235 / 6%); }
 .discharge-search-grid label { display:grid; gap:.35rem; color:#64748b; font-size:.72rem; font-weight:700; }
 .discharge-record[hidden] { display:none; }
+.document-actions { white-space:nowrap; }
+.document-download-button { display:inline-grid; place-items:center; width:2.15rem; height:2.15rem; margin-left:.35rem; border:1px solid #cbdced; border-radius:.65rem; background:#f8fbff; color:#147eb4; vertical-align:middle; transition:background .18s ease,border-color .18s ease,color .18s ease,transform .18s ease,box-shadow .18s ease; }
+.document-download-button svg { width:1.05rem; height:1.05rem; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.document-download-button:hover,.document-download-button:focus-visible { border-color:#72c7eb; background:#eaf8ff; color:#086a9d; box-shadow:0 3px 12px rgb(14 116 164 / 15%); transform:translateY(-1px); outline:none; }
 .dashboard-nav-link { display:inline-flex; align-items:center; min-height:2rem; padding:.35rem .7rem; border:1px solid #bfdbfe; border-radius:.6rem; color:#1d4ed8; background:#eff6ff; font-size:.76rem; font-weight:750; text-decoration:none; transition:background .18s ease,border-color .18s ease,transform .18s ease; }
 .dashboard-nav-link:hover { transform:translateY(-1px); border-color:#60a5fa; background:#dbeafe; }
 .equipment-dashboard { max-width:76rem; margin:0 auto; color:#e5eefb; }
@@ -1115,6 +1182,20 @@ body.ai-modal-open { overflow:hidden; }
 .ai-live-pill i { width:.35rem; height:.35rem; border-radius:50%; background:#4ade80; box-shadow:0 0 8px #4ade80; animation:ai-antenna-pulse 1.4s ease infinite; }
 .ai-results-list { display:grid; align-content:start; gap:.65rem; overflow-y:auto; min-height:0; padding:.1rem .2rem .4rem .05rem; scrollbar-color:rgb(56 189 248 / 38%) transparent; scrollbar-width:thin; }
 .ai-employee-card { padding:.75rem .8rem; border:1px solid rgb(148 190 220 / 16%); border-radius:.9rem; background:linear-gradient(145deg,rgb(255 255 255 / 5%),rgb(255 255 255 / 2%)); animation:ai-card-in .3s ease both; }
+.ai-monitor-card { padding:.75rem .8rem; border:1px solid rgb(125 211 252 / 19%); border-radius:.9rem; background:linear-gradient(145deg,rgb(14 165 233 / 7%),rgb(255 255 255 / 2%)); animation:ai-card-in .3s ease both; }
+.ai-monitor-heading { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding-bottom:.5rem; border-bottom:1px solid rgb(125 211 252 / 12%); }
+.ai-monitor-heading strong { color:#dff7ff; font-size:.76rem; }
+.ai-monitor-empty { margin:.65rem 0 .1rem; color:#9ab6cd; font-size:.69rem; }
+.ai-monitor-item { padding:.6rem .15rem .15rem; }
+.ai-monitor-item + .ai-monitor-item { margin-top:.45rem; border-top:1px solid rgb(148 190 220 / 12%); }
+.ai-monitor-item-meta { display:flex; flex-wrap:wrap; justify-content:space-between; gap:.3rem .7rem; }
+.ai-monitor-item-meta strong { color:#a5f3fc; font-size:.68rem; }
+.ai-monitor-item-meta time { color:#89a6bf; font-size:.62rem; }
+.ai-monitor-item p { margin:.35rem 0 0; color:#c0d3e2; font-size:.7rem; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ai-stock-list { display:grid; gap:.4rem; margin:.6rem 0 0; padding:0; list-style:none; }
+.ai-stock-list li { display:flex; align-items:center; justify-content:space-between; gap:.6rem; padding:.45rem .55rem; border:1px solid rgb(251 191 36 / 16%); border-radius:.55rem; background:rgb(245 158 11 / 5%); }
+.ai-stock-list li span { color:#c7d8e5; font-size:.68rem; overflow-wrap:anywhere; }
+.ai-stock-list li strong { flex:none; color:#fde68a; font-size:.64rem; }
 .ai-employee-top { display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem; }
 .ai-employee-top strong { color:#f1faff; font-size:.82rem; }
 .ai-employee-meta { display:flex; flex-wrap:wrap; gap:.3rem; margin-top:.35rem; }

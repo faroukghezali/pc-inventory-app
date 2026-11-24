@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Importer depuis Excel{% endblock %}
+{% block content %}
+<section class="excel-import-page">
+    <a class="excel-back-link" href="{{ url_for('inventory.index') }}">← Accueil</a>
+    <div class="excel-import-hero">
+        <div class="excel-hero-copy"><span class="excel-kicker">IMPORT D’INVENTAIRE</span><h1>Importer depuis Excel</h1><p>Chargez un tableur, vérifiez les données et confirmez l’ajout des ordinateurs.</p></div>
+        <a class="excel-template-button" href="{{ url_for('inventory.excel_import_template') }}">Télécharger le modèle Excel</a>
+    </div>
+    {% if page_error %}<div class="excel-alert" role="alert">{{ page_error }}</div>{% endif %}
+    <div class="excel-import-grid">
+        <section class="excel-panel excel-upload-panel">
+            <div class="excel-panel-heading"><span class="excel-step">01</span><div><h2>Choisir un fichier</h2><p>Formats .xlsx et .xls, jusqu’à 32 Mo.</p></div></div>
+            <form method="post" action="{{ url_for('inventory.excel_import_preview') }}" enctype="multipart/form-data" class="excel-upload-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label class="excel-dropzone"><span class="excel-upload-icon" aria-hidden="true">↑</span><strong>Déposez votre fichier ici</strong><span>ou choisissez-le sur votre ordinateur</span><input type="file" name="excel_file" accept=".xlsx,.xls" required></label>
+                {% if not xls_supported %}<p class="excel-note">La lecture des fichiers .xls nécessite l’installation de xlrd. Les fichiers .xlsx sont disponibles.</p>{% endif %}
+                <button class="excel-primary-button" type="submit">Analyser et prévisualiser</button>
+            </form>
+        </section>
+        <section class="excel-panel excel-requirements-panel">
+            <div class="excel-panel-heading"><span class="excel-step">02</span><div><h2>Colonnes attendues</h2><p>Les en-têtes sont reconnus en français ou en anglais.</p></div></div>
+            <div class="excel-required-tags"><span>Modèle</span><span>Numéro FAN</span><span>Statut</span><em>obligatoires</em></div>
+            <p>Le numéro FAN doit être unique. Le SN est facultatif, mais doit être unique lorsqu’il est fourni. Les autres colonnes du modèle sont optionnelles.</p>
+            <details class="excel-details"><summary>Formats des champs techniques</summary><ul><li>Statut : En stock, Affecter, Créé, Free ou Utilisation hors domaine.</li><li>Disque dur, Clavier, Système opérateur, Écran, RAM et Pavé tactile : Oui ou Non.</li><li>Batterie : nombre entier entre 0 et 100.</li><li>Ports USB : Toutes, 1, 2 ou 3.</li></ul></details>
+        </section>
+    </div>
+</section>
+{% endblock %}

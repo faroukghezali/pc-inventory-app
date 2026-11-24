@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Résultat de l’import{% endblock %}
+{% block content %}
+<section class="excel-import-page">
+    <a class="excel-back-link" href="{{ url_for('inventory.index') }}">← Accueil</a>
+    <div class="excel-import-hero"><div class="excel-hero-copy"><span class="excel-kicker">RAPPORT D’IMPORT</span><h1>Import terminé</h1><p>{{ filename }}</p></div><a class="excel-template-button" href="{{ url_for('inventory.excel_import_page') }}">Importer un autre fichier</a></div>
+    {% if critical_error %}<div class="excel-alert" role="alert">{{ critical_error }} Aucun enregistrement de cette opération n’a été conservé.</div>{% endif %}
+    <div class="excel-summary-grid"><div class="excel-summary-card is-ready"><span>Importés</span><strong>{{ imported }}</strong></div><div class="excel-summary-card is-skipped"><span>Ignorés</span><strong>{{ skipped|length }}</strong></div><div class="excel-summary-card is-rejected"><span>Rejetés</span><strong>{{ rejected|length }}</strong></div><div class="excel-summary-card"><span>Lignes vides</span><strong>{{ empty_rows }}</strong></div></div>
+    {% if skipped %}<section class="excel-panel excel-review-panel"><h2>Ordinateurs ignorés</h2><div class="excel-table-scroll"><table class="excel-review-table"><thead><tr><th>Ligne</th><th>Modèle</th><th>FAN</th><th>Motif</th></tr></thead><tbody>{% for row in skipped %}<tr><td>{{ row.row_number }}</td><td>{{ row.model_name }}</td><td>{{ row.fan }}</td><td>{{ row.reason }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+    {% if rejected %}<section class="excel-panel excel-review-panel"><h2>Enregistrements rejetés</h2><div class="excel-table-scroll"><table class="excel-review-table"><thead><tr><th>Ligne</th><th>Modèle</th><th>FAN</th><th>Erreurs</th></tr></thead><tbody>{% for row in rejected %}<tr><td>{{ row.row_number }}</td><td>{{ row.model_name or '—' }}</td><td>{{ row.fan or '—' }}</td><td>{{ row.errors|join(', ') }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+</section>
+{% endblock %}

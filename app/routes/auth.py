@@ -4,6 +4,9 @@ import hashlib
 import smtplib
 import os
 import secrets
+import tempfile
+import threading
+import time
 from datetime import datetime, timezone, timedelta
 from email.message import EmailMessage
 
@@ -18,6 +21,55 @@ ACCESS_LEVELS = {'read', 'write', 'full'}
 
 
 def install_request_security(app):
+    activity_log_lock = threading.Lock()
+    last_activity_cleanup = {'monotonic': 0.0}
+
+    def cleanup_activity_log(log_path):
+        retention_row = get_db().execute(
+            "SELECT setting_value FROM app_settings WHERE setting_key = 'activity_log_retention_days'"
+        ).fetchone()
+        try:
+            retention_days = int(retention_row['setting_value']) if retention_row else 7
+        except (TypeError, ValueError):
+            retention_days = 7
+        if retention_days not in {7, 14}:
+            retention_days = 7
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        try:
+            with open(log_path, 'r', encoding='utf-8') as activity_file:
+                lines = activity_file.readlines()
+        except FileNotFoundError:
+            return
+        keep = []
+        removed = False
+        for line in lines:
+            timestamp = line.split('\t', 1)[0].strip()
+            try:
+                entry_time = datetime.fromisoformat(timestamp)
+                if entry_time.tzinfo is None:
+                    entry_time = entry_time.replace(tzinfo=timezone.utc)
+                if entry_time < cutoff:
+                    removed = True
+                    continue
+            except ValueError:
+                # Preserve entries whose timestamp cannot be safely interpreted.
+                pass
+            keep.append(line)
+        if not removed:
+            return
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w', encoding='utf-8', newline='', delete=False,
+                dir=os.path.dirname(log_path), prefix='activity-log-', suffix='.tmp',
+            ) as temp_file:
+                temp_path = temp_file.name
+                temp_file.writelines(keep)
+            os.replace(temp_path, log_path)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
     @app.before_request
     def authenticate_and_authorize():
         if 'csrf_token' not in session:
@@ -40,7 +92,7 @@ def install_request_security(app):
             if not supplied or not hmac.compare_digest(supplied, session['csrf_token']):
                 abort(400, 'Invalid or missing CSRF token')
 
-        if request.endpoint in {'auth.login', 'auth.logout', 'auth.forgot_password', 'auth.verify_reset_code', 'auth.reset_admin_password'}:
+        if request.endpoint in {'auth.login', 'auth.logout', 'auth.forgot_password', 'auth.verify_reset_code', 'auth.reset_admin_password', 'helpdesk.submit_request'}:
             return None
         if not user:
             session.pop('user_id', None)
@@ -61,6 +113,8 @@ def install_request_security(app):
             if endpoint in {'inventory.delete_item', 'inventory.delete_batch'}:
                 if user['access_level'] != 'full':
                     abort(403)
+            elif endpoint in {'helpdesk.delete_request', 'helpdesk.update_activity_log_retention'} and user['is_admin']:
+                pass
             elif endpoint.startswith('auth.user_'):
                 if not user['is_admin']:
                     abort(403)
@@ -82,10 +136,30 @@ def install_request_security(app):
         username = (getattr(g, 'current_user', {}) or {}).get('username') or getattr(g, 'activity_username', None) or 'anonymous'
         record = f"{datetime.now(timezone.utc).isoformat()}\t{username}\t{request.method}\t{request.path}\t{request.endpoint or 'unmatched'}\t{response.status_code}\n"
         log_path = os.path.join(current_app.root_path, '..', 'src', 'activity.log')
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        with open(log_path, 'a', encoding='utf-8') as activity_file:
-            activity_file.write(record)
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with activity_log_lock:
+                now = time.monotonic()
+                if now - last_activity_cleanup['monotonic'] >= 3600:
+                    try:
+                        cleanup_activity_log(log_path)
+                        last_activity_cleanup['monotonic'] = now
+                    except Exception:
+                        current_app.logger.exception('Unable to clean old activity log entries')
+                with open(log_path, 'a', encoding='utf-8') as activity_file:
+                    activity_file.write(record)
+        except OSError:
+            current_app.logger.exception('Unable to append to activity log')
         return response
+
+    # Apply retention on startup as well as periodically during normal traffic.
+    with app.app_context():
+        startup_log_path = os.path.join(app.root_path, '..', 'src', 'activity.log')
+        try:
+            cleanup_activity_log(startup_log_path)
+            last_activity_cleanup['monotonic'] = time.monotonic()
+        except Exception:
+            app.logger.exception('Unable to clean old activity log entries at startup')
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])

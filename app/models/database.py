@@ -73,6 +73,24 @@ def init_db():
         )
     ''')
     conn.execute('''
+        CREATE TABLE IF NOT EXISTS helpdesk_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code_user TEXT NOT NULL,
+            description TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'En attente' CHECK(status IN ('En attente', 'Résolu')),
+            submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TEXT
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS app_settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value TEXT NOT NULL
+        )
+    ''')
+    conn.execute('''INSERT OR IGNORE INTO app_settings (setting_key, setting_value)
+        VALUES ('activity_log_retention_days', '7')''')
+    conn.execute('''
         CREATE TABLE IF NOT EXISTS accessories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             category TEXT NOT NULL,

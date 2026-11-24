@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}Request #{{ support_request.id }} – Helpdesk{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/helpdesk.css') }}">{% endblock %}
+{% block content %}
+<section class="helpdesk-admin-page helpdesk-detail-page">
+  <a class="helpdesk-back-link" href="{{ url_for('helpdesk.management') }}">← All Helpdesk requests</a>
+  <div class="helpdesk-admin-hero"><div><span class="helpdesk-kicker">SUPPORT REQUEST · #{{ '%05d'|format(support_request.id) }}</span><h1>Request details</h1><p>Submitted {{ support_request.submitted_at }}</p></div><span class="helpdesk-status detail-status {% if support_request.status == 'Résolu' %}is-resolved{% endif %}"><i></i>{{ support_request.status }}</span></div>
+  <article class="helpdesk-detail-card"><div class="helpdesk-detail-meta"><div><span>CODE USER</span><strong>{{ support_request.code_user }}</strong></div><div><span>SUBMITTED</span><strong>{{ support_request.submitted_at }}</strong></div><div><span>CURRENT STATUS</span><strong>{{ support_request.status }}</strong></div></div><div class="helpdesk-detail-message"><span>PROBLEM DESCRIPTION</span><p>{{ support_request.description }}</p></div>
+    {% if support_request.status != 'Résolu' %}<form method="post" action="{{ url_for('helpdesk.resolve_request', request_id=support_request.id) }}" class="helpdesk-resolve-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div><strong>Solution found?</strong><span>Mark this request resolved once the employee’s issue has been fixed.</span></div><button class="helpdesk-resolve-button" type="submit">✓ &nbsp; Solution Found</button></form>{% else %}<div class="helpdesk-resolved-note">✓ &nbsp; Resolved{% if support_request.resolved_at %} on {{ support_request.resolved_at }}{% endif %}</div>{% endif %}
+    <form method="post" action="{{ url_for('helpdesk.delete_request', request_id=support_request.id) }}" class="helpdesk-detail-delete-form" onsubmit="return confirm('Permanently delete this Helpdesk request?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="helpdesk-delete-button" type="submit">Delete request</button></form>
+  </article>
+</section>
+{% endblock %}

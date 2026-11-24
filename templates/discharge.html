@@ -5,7 +5,7 @@
   <a href="{{ url_for('inventory.discharge_index') }}" class="btn-back">← Retour aux décharges</a>
   {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
   <header class="accessory-heading">
-    <div><span class="accessory-kicker">DOCUMENT DE REMISE</span><h1>Préparer une décharge</h1><p class="text-muted">Choisissez les accessoires du stock à remettre. Le stock baisse à la validation.</p></div>
+    <div><span class="accessory-kicker">DOCUMENT DE REMISE</span><h1>Préparer une décharge</h1><p class="text-muted">L’ordinateur sera enregistré dans la décharge. Les accessoires sont facultatifs ; le stock baisse à la validation.</p></div>
     <div class="discharge-top-actions"><a class="btn btn-secondary" href="{{ url_for('inventory.discharge_index') }}">Annuler</a><button class="btn btn-primary" type="button" onclick="window.print()">Imprimer la décharge</button><button class="btn btn-discharge-confirm" type="submit" form="dischargeSelectionForm">OK · Valider</button></div>
   </header>
   <form id="dischargeSelectionForm" method="POST" action="{{ url_for('inventory.discharge_confirm', item_id=item.id) }}" class="discharge-layout">
@@ -18,7 +18,7 @@
           <label class="form-label">Marque disponible
             <select class="form-select discharge-brand" name="brand_{{ slug }}" data-slug="{{ slug }}" onchange="renderDischargeItems()" disabled>
               <option value="">Choisir une marque</option>
-              {% for option in accessories[slug] %}{% if slug == 'telephones' %}<option value="{{ option.id }}" data-description="{{ option.brand }} {{ option.phone_model }}{% if option.serial_number %} · SN {{ option.serial_number }}{% endif %}" {% if not option.available_quantity %}disabled{% endif %}>{{ option.brand }} {{ option.phone_model }}{% if option.serial_number %} · SN {{ option.serial_number }}{% endif %}</option>{% else %}<option value="{{ option.brand }}" {% if not option.available_quantity %}disabled{% endif %}>{{ option.brand }} — {{ option.available_quantity }} disponible(s)</option>{% endif %}{% endfor %}
+              {% for option in accessories[slug] %}{% if slug in ['telephones', 'sim-cards'] %}<option value="{{ option.id }}" data-description="{% if slug == 'sim-cards' %}{{ option.brand }} - {{ option.serial_number }} - {{ option.technical_details }}{% else %}{{ option.brand }} {{ option.phone_model }}{% if option.serial_number %} ? SN {{ option.serial_number }}{% endif %}{% endif %}" {% if not option.available_quantity %}disabled{% endif %}>{% if slug == 'sim-cards' %}{{ option.brand }} - {{ option.serial_number }} - {{ option.technical_details }}{% else %}{{ option.brand }} {{ option.phone_model }}{% if option.serial_number %} ? SN {{ option.serial_number }}{% endif %}{% endif %}</option>{% else %}<option value="{{ option.brand }}" {% if not option.available_quantity %}disabled{% endif %}>{{ option.brand }} — {{ option.available_quantity }} disponible(s)</option>{% endif %}{% endfor %}
             </select>
           </label>
           {% if not accessories[slug] or accessories[slug]|selectattr('available_quantity')|list|length == 0 %}<p class="stock-empty-alert">Aucun stock disponible pour cette catégorie.</p>{% endif %}
@@ -42,5 +42,5 @@
 {% endblock %}
 {% block extra_scripts %}<script>
 function toggleDischargeAccessory(box){const select=document.querySelector(`.discharge-brand[data-slug="${box.dataset.slug}"]`);document.getElementById('detail-'+box.dataset.slug).classList.toggle('hidden',!box.checked);select.disabled=!box.checked;select.required=box.checked;renderDischargeItems()}
-function renderDischargeItems(){const target=document.getElementById('dynamicAccessories');target.replaceChildren();document.querySelectorAll('.discharge-check:checked').forEach(box=>{const select=document.querySelector(`.discharge-brand[data-slug="${box.dataset.slug}"]`);if(!select.value)return;const li=document.createElement('li');const option=select.selectedOptions[0];li.textContent=box.dataset.slug==='telephones'?`Téléphone ${option.dataset.description}`:`Un(e) ${box.dataset.label.toLowerCase()} ${select.value}`;target.appendChild(li)})}
+function renderDischargeItems(){const target=document.getElementById('dynamicAccessories');target.replaceChildren();document.querySelectorAll('.discharge-check:checked').forEach(box=>{const select=document.querySelector(`.discharge-brand[data-slug="${box.dataset.slug}"]`);if(!select.value)return;const li=document.createElement('li');const option=select.selectedOptions[0];li.textContent=box.dataset.slug==='sim-cards'?`SIM Card ${option.dataset.description}`:box.dataset.slug==='telephones'?`Phone ${option.dataset.description}`:`${box.dataset.label} ${select.value}`;target.appendChild(li)})}
 </script>{% endblock %}

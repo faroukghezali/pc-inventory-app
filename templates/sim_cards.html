@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}SIM Cards – IT Inventory{% endblock %}
+{% block content %}
+<div class="page-fade accessory-page">
+  <a href="{{ url_for('inventory.index') }}" class="btn-back accessory-back">← Retour à l’accueil</a>
+  <header class="accessory-heading"><div><h1>SIM Cards</h1><p class="text-muted">Gérez les cartes SIM disponibles et leurs abonnements.</p></div><div class="accessory-total"><span id="accessoryCountLabel">Cartes enregistrées</span><strong id="accessoryCount" data-total="{{ total }}">{{ total }}</strong></div></header>
+  {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+  <div class="accessory-toolbar">
+    <label class="accessory-search">Rechercher par modèle ou numéro
+      <input id="simSearch" class="form-input" type="search" placeholder="Modèle, téléphone ou forfait" oninput="filterSimRows()">
+    </label>
+    {% if current_user.access_level in ['write', 'full'] %}
+    <div class="accessory-toolbar-actions"><button class="btn btn-secondary" type="button" onclick="editSimCard()">Modifier</button><form method="POST" action="{{ url_for('inventory.accessory_delete', category='sim-cards') }}" id="simDeleteForm"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><span id="simDeleteIds"></span><button class="btn btn-toolbar-delete" type="button" onclick="deleteSimCards()">Supprimer</button></form><button class="btn btn-primary" type="button" onclick="document.getElementById('simAddModal').classList.remove('hidden')">＋ Ajouter</button></div>
+    {% endif %}
+  </div>
+  <div class="card accessory-table-wrap"><table class="inv-table" id="simTable"><thead><tr><th><input type="checkbox" id="simSelectAll" onchange="toggleSimCards(this)"></th><th>ID</th><th>Nom du modèle de la SIM</th><th>Numéro de téléphone</th><th>Forfait</th><th>État</th><th>Ajouté le</th></tr></thead><tbody>
+    {% for row in rows %}<tr data-search="{{ (row.brand ~ ' ' ~ (row.serial_number or '') ~ ' ' ~ (row.technical_details or '') ~ ' ' ~ (row.assigned_to or ''))|lower }}"><td><input class="sim-select" type="checkbox" value="{{ row.id }}" data-model="{{ row.brand }}" data-number="{{ row.serial_number or '' }}" data-plan="{{ row.technical_details or '' }}" {% if row.discharge_id %}disabled title="Return this SIM before editing or deleting it"{% endif %} onchange="updateSimSelection()"></td><td class="font-mono">#{{ row.id }}</td><td>{{ row.brand }}</td><td>{{ row.serial_number }}</td><td>{{ row.technical_details }}</td><td>{% if row.discharge_id %}Affectée · {{ row.assigned_to or 'Employé' }}{% else %}Disponible{% endif %}</td><td>{{ row.created_at }}</td></tr>{% else %}<tr><td colspan="7" class="accessory-empty">Aucune carte SIM enregistrée.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+<div id="simAddModal" class="accessory-modal hidden" role="dialog" aria-modal="true"><div class="accessory-dialog"><button class="modal-close-btn accessory-close" type="button" onclick="document.getElementById('simAddModal').classList.add('hidden')" aria-label="Fermer">×</button><h2>Ajouter une SIM Card</h2>
+  <form method="POST" action="{{ url_for('inventory.accessory_add', category='sim-cards') }}" class="accessory-add-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="form-label">Nom du modèle de la SIM<input class="form-input" name="brand" maxlength="100" required></label>
+    <label class="form-label">Numéro de téléphone<input class="form-input" name="serial_number" maxlength="40" type="tel" required></label>
+    <label class="form-label">Forfait<input class="form-input" name="technical_details" maxlength="120" required></label>
+    <label class="form-label">Quantité<input class="form-input" type="number" name="quantity" min="1" max="10000" value="1" required></label>
+    <button class="btn btn-primary accessory-add-button" type="submit">Ajouter</button>
+  </form>
+</div></div>
+<div id="simEditModal" class="accessory-modal hidden" role="dialog" aria-modal="true"><div class="accessory-dialog"><button class="modal-close-btn accessory-close" type="button" onclick="document.getElementById('simEditModal').classList.add('hidden')" aria-label="Fermer">×</button><h2>Modifier une SIM Card</h2>
+  <form method="POST" action="{{ url_for('inventory.accessory_update', category='sim-cards') }}" class="accessory-add-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="id" id="simEditId">
+    <label class="form-label">Nom du modèle de la SIM<input class="form-input" name="brand" id="simEditModel" maxlength="100" required></label>
+    <label class="form-label">Numéro de téléphone<input class="form-input" name="serial_number" id="simEditNumber" maxlength="40" type="tel" required></label>
+    <label class="form-label">Forfait<input class="form-input" name="technical_details" id="simEditPlan" maxlength="120" required></label>
+    <button class="btn btn-primary accessory-add-button" type="submit">Enregistrer</button>
+  </form>
+</div></div>
+{% endblock %}
+{% block extra_scripts %}<script>
+function selectedSimIds(){return [...document.querySelectorAll('.sim-select:checked')].map(box=>box.value)}
+function toggleSimCards(master){document.querySelectorAll('.sim-select:not(:disabled)').forEach(box=>box.checked=master.checked);updateSimSelection()}
+function updateSimSelection(){const boxes=[...document.querySelectorAll('.sim-select:not(:disabled)')],selected=boxes.filter(box=>box.checked).length,master=document.getElementById('simSelectAll');master.checked=boxes.length>0&&selected===boxes.length;master.indeterminate=selected>0&&selected<boxes.length}
+function filterSimRows(){const term=document.getElementById('simSearch').value.trim().toLowerCase(),rows=[...document.querySelectorAll('#simTable tbody tr[data-search]')];rows.forEach(row=>row.hidden=!row.dataset.search.includes(term));document.getElementById('accessoryCount').textContent=rows.filter(row=>!row.hidden).length}
+function editSimCard(){const ids=selectedSimIds();if(ids.length!==1){alert('Sélectionnez une seule carte SIM à modifier.');return}const box=document.querySelector(`.sim-select[value="${ids[0]}"]`);document.getElementById('simEditId').value=ids[0];document.getElementById('simEditModel').value=box.dataset.model;document.getElementById('simEditNumber').value=box.dataset.number;document.getElementById('simEditPlan').value=box.dataset.plan;document.getElementById('simEditModal').classList.remove('hidden')}
+function deleteSimCards(){const ids=selectedSimIds();if(!ids.length){alert('Sélectionnez au moins une carte SIM.');return}if(!confirm(`Supprimer ${ids.length} carte(s) SIM ?`))return;const container=document.getElementById('simDeleteIds');container.replaceChildren(...ids.map(id=>{const input=document.createElement('input');input.type='hidden';input.name='ids';input.value=id;return input}));document.getElementById('simDeleteForm').submit()}
+</script>{% endblock %}

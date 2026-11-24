@@ -27,8 +27,10 @@ def create_app(config_class=Config):
     # Register blueprints
     from .routes.inventory import inventory_bp
     from .routes.auth import auth_bp, install_request_security
+    from .routes.helpdesk import helpdesk_bp
     app.register_blueprint(inventory_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(helpdesk_bp)
     install_request_security(app)
 
     return app

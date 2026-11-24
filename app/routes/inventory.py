@@ -6,13 +6,21 @@ from flask import (
     Blueprint, render_template, redirect, url_for, request, flash, jsonify
 )
 from io import BytesIO
+import json
 import os
+import re
 import sqlite3
 import tempfile
+import unicodedata
+import uuid
+from itertools import chain, islice
 from flask import current_app, g, send_file
-from datetime import date
+from datetime import date, datetime, timezone
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from app.models.database import (
     get_all_models, get_total_count,
@@ -24,6 +32,506 @@ from app.models.database import (
 )
 
 inventory_bp = Blueprint('inventory', __name__)
+
+try:
+    import xlrd
+except ImportError:
+    xlrd = None
+
+EXCEL_IMPORT_MAX_BYTES = 32 * 1024 * 1024
+EXCEL_IMPORT_MAX_ROWS = 50000
+EXCEL_PREVIEW_LIMIT = 100
+EXCEL_IMPORT_TTL_SECONDS = 2 * 60 * 60
+
+EXCEL_FIELD_ALIASES = {
+    'model_name': {'modele', 'model', 'modele ordinateur', 'computer model', 'modele pc'},
+    'fan': {'numero fan', 'fan', 'fan number', 'numero de fan'},
+    'sn': {'sn', 'serial number', 'numero de serie', 'numero serie'},
+    'statut': {'statut', 'status', 'etat', 'computer status'},
+    'disque_dur': {'disque dur', 'disque', 'hard drive', 'hard disk'},
+    'etat_clavier': {'clavier', 'etat clavier', 'keyboard', 'keyboard status'},
+    'systeme_operateur': {'systeme operateur', 'systeme dexploitation', 'systeme d exploitation', 'os', 'operating system'},
+    'etat_ecran': {'ecran', 'etat ecran', 'screen', 'display'},
+    'batterie': {'batterie', 'battery', 'battery percentage', 'pourcentage batterie'},
+    'ram': {'ram', 'memoire ram', 'ram status'},
+    'ports_usb': {'ports usb', 'usb ports', 'usb'},
+    'pave_tactile': {'pave tactile', 'touchpad', 'trackpad'},
+    'username': {'nom utilisateur', 'nom d utilisateur', 'nom dusager', 'utilisateur', 'username', 'employee name', 'full name'},
+    'code_user': {'code user', 'code utilisateur', 'user code'},
+    'license_num': {'n licence', 'numero licence', 'licence', 'license number', 'numero de licence'},
+    'obs': {'obs', 'observation', 'observations', 'commentaire', 'commentaires', 'notes'},
+}
+EXCEL_REQUIRED_FIELDS = {'model_name', 'fan', 'statut'}
+EXCEL_STATUSES = {
+    'en stock': 'En stock',
+    'affecter': 'Affecter',
+    'cree': 'Créé',
+    'free': 'Free',
+    'utilisation hors domaine': 'Utilisation hors domaine',
+}
+EXCEL_COMPONENT_FIELDS = {'disque_dur', 'etat_clavier', 'systeme_operateur', 'etat_ecran', 'ram', 'pave_tactile'}
+EXCEL_TEMPLATE_HEADERS = [
+    ('Modèle', 'model_name'), ('Numéro FAN', 'fan'), ('SN', 'sn'), ('Statut', 'statut'),
+    ('Disque dur', 'disque_dur'), ('Clavier', 'etat_clavier'),
+    ('Système opérateur', 'systeme_operateur'), ('Écran', 'etat_ecran'),
+    ('Batterie', 'batterie'), ('RAM', 'ram'), ('Ports USB', 'ports_usb'),
+    ('Pavé tactile', 'pave_tactile'), ("Nom d'utilisateur", 'username'),
+    ('Code User', 'code_user'), ('N° Licence', 'license_num'), ('OBS', 'obs'),
+]
+
+
+def _excel_header_key(value):
+    text = unicodedata.normalize('NFKD', str(value or '').replace('’', "'"))
+    text = ''.join(char for char in text if not unicodedata.combining(char)).casefold()
+    return re.sub(r'[^a-z0-9]+', ' ', text).strip()
+
+
+def _excel_cell_text(value):
+    if value is None:
+        return ''
+    if isinstance(value, bool):
+        return 'Oui' if value else 'Non'
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if float(value).is_integer():
+            return str(int(value))
+        return format(value, '.15g')
+    if isinstance(value, datetime):
+        return value.isoformat(sep=' ')
+    return str(value).strip()
+
+
+def _excel_column_map(header_row):
+    aliases = {}
+    for field, names in EXCEL_FIELD_ALIASES.items():
+        for name in names | {label for label, mapped_field in EXCEL_TEMPLATE_HEADERS if mapped_field == field}:
+            aliases[_excel_header_key(name)] = field
+    mapping = {}
+    duplicates = []
+    for index, cell in enumerate(header_row):
+        field = aliases.get(_excel_header_key(cell))
+        if not field:
+            continue
+        if field in mapping:
+            duplicates.append(field)
+        else:
+            mapping[field] = index
+    return mapping, duplicates
+
+
+def _read_excel_rows(extension, file_bytes):
+    if extension == '.xls':
+        if xlrd is None:
+            raise ValueError('La lecture des fichiers .xls nécessite la dépendance xlrd. Installez les dépendances du projet puis réessayez.')
+        workbook = xlrd.open_workbook(file_contents=file_bytes, on_demand=True)
+        if workbook.nsheets == 0:
+            raise ValueError('Le fichier Excel ne contient aucune feuille.')
+        sheet = workbook.sheet_by_index(0)
+        iterator = (sheet.row_values(index) for index in range(sheet.nrows))
+        return iterator, workbook
+    workbook = load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+    if not workbook.worksheets:
+        workbook.close()
+        raise ValueError('Le fichier Excel ne contient aucune feuille.')
+    sheet = workbook.worksheets[0]
+    return sheet.iter_rows(values_only=True), workbook
+
+
+def _parse_excel_upload(extension, file_bytes, db):
+    iterator, workbook = _read_excel_rows(extension, file_bytes)
+    try:
+        sample = list(islice(enumerate(iterator, start=1), 10))
+        header_entry = None
+        header_map = None
+        duplicate_headers = []
+        for row_number, values in sample:
+            candidate_map, candidate_duplicates = _excel_column_map(values)
+            if EXCEL_REQUIRED_FIELDS.issubset(candidate_map):
+                header_entry = (row_number, values)
+                header_map = candidate_map
+                duplicate_headers = candidate_duplicates
+                break
+        if header_entry is None:
+            raise ValueError('Colonnes obligatoires introuvables. Le fichier doit contenir Modèle, Numéro FAN et Statut dans les 10 premières lignes.')
+        if duplicate_headers:
+            labels = sorted({field for field in duplicate_headers})
+            raise ValueError('Plusieurs colonnes correspondent au même champ : ' + ', '.join(labels) + '.')
+        header_row_number = header_entry[0]
+
+        rows_after_header = chain(
+            ((index, row) for index, row in sample if index > header_row_number),
+            enumerate(iterator, start=11),
+        )
+
+        parsed = []
+        rejected = []
+        empty_rows = 0
+        for row_number, values in rows_after_header:
+            if row_number - header_row_number > EXCEL_IMPORT_MAX_ROWS:
+                raise ValueError(f'Le fichier dépasse la limite de {EXCEL_IMPORT_MAX_ROWS:,} lignes après son en-tête. Divisez le classeur en plusieurs fichiers.')
+            if not any(_excel_cell_text(value) for value in values):
+                empty_rows += 1
+                continue
+            record, errors = _normalize_import_record(values, header_map, row_number)
+            if errors:
+                rejected.append({'row_number': row_number, 'fan': record['fan'], 'model_name': record['model_name'], 'errors': errors})
+            else:
+                parsed.append(record)
+            if len(parsed) + len(rejected) > EXCEL_IMPORT_MAX_ROWS:
+                raise ValueError(f'Le fichier dépasse la limite de {EXCEL_IMPORT_MAX_ROWS:,} lignes de données. Divisez le classeur en plusieurs fichiers.')
+
+        fan_groups = {}
+        sn_groups = {}
+        for record in parsed:
+            fan_groups.setdefault(record['fan'].casefold(), []).append(record)
+            if record['sn']:
+                sn_groups.setdefault(record['sn'].casefold(), []).append(record)
+        duplicate_rows = {}
+        for group, description in ((fan_groups, 'Numéro FAN dupliqué dans le fichier'), (sn_groups, 'SN dupliqué dans le fichier')):
+            for records in group.values():
+                if len(records) > 1:
+                    for record in records:
+                        duplicate_rows.setdefault(record['row_number'], []).append(description)
+        for record in parsed:
+            errors = duplicate_rows.get(record['row_number'])
+            if errors:
+                rejected.append({'row_number': record['row_number'], 'fan': record['fan'], 'model_name': record['model_name'], 'errors': errors})
+
+        parsed = [record for record in parsed if record['row_number'] not in duplicate_rows]
+        existing_fans, existing_sns = _existing_inventory_keys(db)
+        to_import = []
+        skipped = []
+        for record in parsed:
+            fan_key = record['fan'].casefold()
+            sn_key = record['sn'].casefold() if record['sn'] else None
+            if fan_key in existing_fans:
+                skipped.append({'row_number': record['row_number'], 'fan': record['fan'], 'model_name': record['model_name'], 'reason': 'Numéro FAN déjà enregistré; aucune donnée existante n’a été modifiée.'})
+            elif sn_key and sn_key in existing_sns:
+                skipped.append({'row_number': record['row_number'], 'fan': record['fan'], 'model_name': record['model_name'], 'reason': 'SN déjà enregistré sur un ordinateur existant; aucune donnée existante n’a été modifiée.'})
+            else:
+                to_import.append(record)
+        return {
+            'to_import': to_import,
+            'skipped': skipped,
+            'rejected': rejected,
+            'empty_rows': empty_rows,
+            'header_row_number': header_row_number,
+        }
+    finally:
+        if hasattr(workbook, 'close'):
+            workbook.close()
+        elif hasattr(workbook, 'release_resources'):
+            workbook.release_resources()
+
+
+def _normalize_import_record(values, column_map, row_number):
+    record = {field: _excel_cell_text(values[index]) if index < len(values) else ''
+              for field, index in column_map.items()}
+    errors = []
+    for field in EXCEL_REQUIRED_FIELDS:
+        if not record.get(field, '').strip():
+            label = next(label for label, mapped in EXCEL_TEMPLATE_HEADERS if mapped == field)
+            errors.append(f'{label} manquant')
+
+    model_name = record.get('model_name', '').strip()
+    fan = record.get('fan', '').strip()
+    sn = record.get('sn', '').strip() or None
+    statut_text = record.get('statut', '').strip()
+    statut_key = _excel_header_key(statut_text)
+    statut = EXCEL_STATUSES.get(statut_key)
+    if statut_text and not statut:
+        errors.append('Statut invalide (valeurs autorisées : En stock, Affecter, Créé, Free, Utilisation hors domaine)')
+    if len(model_name) > 120:
+        errors.append('Modèle trop long (120 caractères maximum)')
+    if len(fan) > 100:
+        errors.append('Numéro FAN trop long (100 caractères maximum)')
+    if sn and len(sn) > 120:
+        errors.append('SN trop long (120 caractères maximum)')
+
+    result = {
+        'row_number': row_number,
+        'model_name': model_name,
+        'model_slug': model_name.lower().replace(' ', '-'),
+        'fan': fan,
+        'sn': sn,
+        'statut': statut or statut_text,
+        'username': record.get('username', '').strip() or None,
+        'code_user': record.get('code_user', '').strip() or None,
+        'license_num': record.get('license_num', '').strip() or None,
+        'obs': record.get('obs', '').strip() or None,
+    }
+    for field in ('username', 'code_user', 'license_num'):
+        if result[field] and len(result[field]) > 100:
+            errors.append(f'{field} dépasse 100 caractères')
+    if result['obs'] and len(result['obs']) > 2000:
+        errors.append('OBS dépasse 2 000 caractères')
+
+    for field in EXCEL_COMPONENT_FIELDS:
+        text = record.get(field, '').strip()
+        if not text:
+            result[field] = None
+        elif _excel_header_key(text) in {'oui', 'yes', 'true', '1'}:
+            result[field] = 'Oui'
+        elif _excel_header_key(text) in {'non', 'no', 'false', '0'}:
+            result[field] = 'Non'
+        else:
+            label = next(label for label, mapped in EXCEL_TEMPLATE_HEADERS if mapped == field)
+            errors.append(f'{label} doit être Oui ou Non')
+            result[field] = None
+
+    battery_text = record.get('batterie', '').strip().replace('%', '').strip()
+    if not battery_text:
+        result['batterie'] = None
+    else:
+        try:
+            battery_number = float(battery_text)
+            if not battery_number.is_integer() or not 0 <= battery_number <= 100:
+                raise ValueError
+            result['batterie'] = int(battery_number)
+        except ValueError:
+            errors.append('Batterie doit être un pourcentage entier entre 0 et 100')
+            result['batterie'] = None
+
+    usb_text = record.get('ports_usb', '').strip()
+    usb_key = _excel_header_key(usb_text)
+    usb_values = {'toutes': 'Toutes', 'all': 'Toutes', '1': '1', '2': '2', '3': '3'}
+    result['ports_usb'] = usb_values.get(usb_key) if usb_text else None
+    if usb_text and result['ports_usb'] is None:
+        errors.append('Ports USB doit être Toutes, 1, 2 ou 3')
+    return result, errors
+
+
+def _existing_inventory_keys(db):
+    rows = db.execute('SELECT fan, sn FROM inventory').fetchall()
+    return (
+        {row['fan'].strip().casefold() for row in rows if row['fan'] and row['fan'].strip()},
+        {row['sn'].strip().casefold() for row in rows if row['sn'] and row['sn'].strip()},
+    )
+
+
+def _excel_stage_directory():
+    directory = os.path.join(tempfile.gettempdir(), 'pc-inventory-excel-imports')
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def _excel_stage_path(token):
+    if not re.fullmatch(r'[a-f0-9]{32}', token or ''):
+        return None
+    return os.path.join(_excel_stage_directory(), token + '.json')
+
+
+def _cleanup_excel_stages():
+    cutoff = datetime.now().timestamp() - EXCEL_IMPORT_TTL_SECONDS
+    for entry in os.scandir(_excel_stage_directory()):
+        if entry.is_file() and entry.name.endswith('.json'):
+            try:
+                if entry.stat().st_mtime < cutoff:
+                    os.remove(entry.path)
+            except OSError:
+                continue
+
+
+def _log_excel_import(imported, skipped, rejected, errors, filename='', error_details=''):
+    user = (g.get('current_user') or {}).get('username', 'unknown')
+    safe_filename = re.sub(r'[\t\r\n]+', ' ', os.path.basename(filename or ''))
+    safe_error_details = re.sub(r'[\t\r\n]+', ' ', str(error_details or ''))[:1000]
+    line = (f"{datetime.now(timezone.utc).isoformat()}\t{user}\tEXCEL_IMPORT\t/import/excel"
+            f"\timported={imported}\tskipped={skipped}\trejected={rejected}\terrors={errors}"
+            f"\tfile={safe_filename}\terror_details={safe_error_details}\n")
+    log_path = os.path.abspath(os.path.join(current_app.root_path, '..', 'src', 'activity.log'))
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, 'a', encoding='utf-8') as activity_file:
+        activity_file.write(line)
+
+
+def _document_download(html, filename):
+    """Return a standalone styled HTML copy of a rendered movement document."""
+    def inline_stylesheet(match):
+        stylesheet_name = match.group(1) + '.css'
+        stylesheet_path = os.path.join(current_app.static_folder, 'css', stylesheet_name)
+        try:
+            with open(stylesheet_path, encoding='utf-8') as stylesheet_file:
+                stylesheet = stylesheet_file.read()
+        except OSError:
+            return match.group(0)
+        return '<style>\n' + stylesheet + '\n</style>'
+
+    standalone_html = re.sub(
+        r'<link\s+rel="stylesheet"\s+href="[^"]*/static/css/(main|animations)\.css"\s*>',
+        inline_stylesheet, html, flags=re.IGNORECASE,
+    )
+    return send_file(BytesIO(standalone_html.encode('utf-8')), mimetype='text/html',
+                     as_attachment=True, download_name=filename)
+
+
+@inventory_bp.route('/import/excel')
+def excel_import_page():
+    return render_template('excel_import.html', xls_supported=xlrd is not None)
+
+
+@inventory_bp.route('/import/excel/template')
+def excel_import_template():
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'Inventaire'
+    headers = [label for label, _ in EXCEL_TEMPLATE_HEADERS]
+    sheet.append(headers)
+    sheet.freeze_panes = 'A2'
+    sheet.auto_filter.ref = f'A1:{get_column_letter(len(headers))}1001'
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='12304A')
+        cell.alignment = Alignment(vertical='center')
+    sheet.row_dimensions[1].height = 26
+    widths = [24, 20, 22, 24, 15, 15, 22, 15, 15, 12, 15, 17, 25, 18, 16, 40]
+    for index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    table = Table(displayName='InventaireOrdinateurs', ref=f'A1:{get_column_letter(len(headers))}2')
+    table.tableStyleInfo = TableStyleInfo(name='TableStyleMedium2', showRowStripes=True,
+                                         showColumnStripes=False, showFirstColumn=False,
+                                         showLastColumn=False)
+    sheet.add_table(table)
+    # Text formatting keeps FAN numbers and serial numbers with leading zeroes intact.
+    for row in range(2, 1002):
+        sheet.cell(row, 2).number_format = '@'
+        sheet.cell(row, 3).number_format = '@'
+    status_validation = DataValidation(type='list', formula1='"En stock,Affecter,Créé,Free,Utilisation hors domaine"', allow_blank=True)
+    yes_no_validation = DataValidation(type='list', formula1='"Oui,Non"', allow_blank=True)
+    battery_validation = DataValidation(type='whole', operator='between', formula1='0', formula2='100', allow_blank=True)
+    usb_validation = DataValidation(type='list', formula1='"Toutes,1,2,3"', allow_blank=True)
+    for validation in (status_validation, yes_no_validation, battery_validation, usb_validation):
+        sheet.add_data_validation(validation)
+    status_validation.add('D2:D1001')
+    for column in ('E', 'F', 'G', 'H', 'J', 'L'):
+        yes_no_validation.add(f'{column}2:{column}1001')
+    battery_validation.add('I2:I1001')
+    usb_validation.add('K2:K1001')
+
+    instructions = workbook.create_sheet('Instructions')
+    instructions.append(['Importer un inventaire informatique'])
+    instructions.append(['Colonnes obligatoires', 'Modèle, Numéro FAN, Statut'])
+    instructions.append(['Valeurs de Statut', 'En stock, Affecter, Créé, Free, Utilisation hors domaine'])
+    instructions.append(['Champs Oui / Non', 'Disque dur, Clavier, Système opérateur, Écran, RAM, Pavé tactile'])
+    instructions.append(['Batterie', 'Entier compris entre 0 et 100 (pourcentage)'])
+    instructions.append(['Ports USB', 'Toutes, 1, 2 ou 3'])
+    instructions.append(['Identifiants', 'Numéro FAN doit être unique. SN doit être unique lorsqu’il est renseigné.'])
+    instructions.append(['Format', 'Gardez les intitulés de la première ligne. Les autres colonnes sont facultatives.'])
+    instructions.column_dimensions['A'].width = 25
+    instructions.column_dimensions['B'].width = 95
+    instructions.freeze_panes = 'A2'
+    for cell in instructions[1]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='12304A')
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                     as_attachment=True, download_name='modele_import_inventaire.xlsx')
+
+
+@inventory_bp.route('/import/excel/preview', methods=['POST'])
+def excel_import_preview():
+    upload = request.files.get('excel_file')
+    filename = os.path.basename(upload.filename or '') if upload else ''
+    extension = os.path.splitext(filename)[1].lower()
+    if not upload or not filename:
+        _log_excel_import(0, 0, 0, 1, filename, 'Aucun fichier sélectionné')
+        return render_template('excel_import.html', xls_supported=xlrd is not None,
+                               page_error='Sélectionnez un fichier Excel avant de continuer.'), 400
+    if extension not in {'.xlsx', '.xls'}:
+        _log_excel_import(0, 0, 0, 1, filename, 'Extension non prise en charge')
+        return render_template('excel_import.html', xls_supported=xlrd is not None,
+                               page_error='Format non pris en charge. Choisissez un fichier .xlsx ou .xls.'), 400
+    file_bytes = upload.stream.read(EXCEL_IMPORT_MAX_BYTES + 1)
+    if len(file_bytes) > EXCEL_IMPORT_MAX_BYTES:
+        _log_excel_import(0, 0, 0, 1, filename, 'Fichier supérieur à 32 Mo')
+        return render_template('excel_import.html', xls_supported=xlrd is not None,
+                               page_error='Le fichier dépasse la limite de 32 Mo.'), 413
+    try:
+        batch = _parse_excel_upload(extension, file_bytes, get_db())
+    except Exception as error:
+        _log_excel_import(0, 0, 1, 1, filename, str(error))
+        return render_template('excel_import.html', xls_supported=xlrd is not None,
+                               page_error=str(error)), 400
+    token = uuid.uuid4().hex
+    batch.update({'filename': filename, 'created_by': g.current_user['id'],
+                  'created_at': datetime.now(timezone.utc).isoformat()})
+    _cleanup_excel_stages()
+    with open(_excel_stage_path(token), 'w', encoding='utf-8') as stage_file:
+        json.dump(batch, stage_file, ensure_ascii=False)
+    return render_template('excel_import_preview.html', batch=batch, token=token,
+                           preview_limit=EXCEL_PREVIEW_LIMIT)
+
+
+@inventory_bp.route('/import/excel/confirm', methods=['POST'])
+def excel_import_confirm():
+    token = request.form.get('token', '')
+    stage_path = _excel_stage_path(token)
+    if not stage_path or not os.path.isfile(stage_path):
+        flash('Cette prévisualisation a expiré. Veuillez importer le fichier à nouveau.', 'error')
+        return redirect(url_for('inventory.excel_import_page'))
+    with open(stage_path, 'r', encoding='utf-8') as stage_file:
+        batch = json.load(stage_file)
+    if batch.get('created_by') != g.current_user['id']:
+        return 'Prévisualisation invalide.', 403
+
+    imported = 0
+    late_skipped = []
+    critical_error = None
+    db = get_db()
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        existing_fans, existing_sns = _existing_inventory_keys(db)
+        insert_rows = []
+        for record in batch['to_import']:
+            fan_key = record['fan'].strip().casefold()
+            sn_key = record['sn'].strip().casefold() if record.get('sn') else None
+            if fan_key in existing_fans:
+                late_skipped.append({'row_number': record['row_number'], 'fan': record['fan'], 'model_name': record['model_name'], 'reason': 'Numéro FAN enregistré depuis la prévisualisation.'})
+                continue
+            if sn_key and sn_key in existing_sns:
+                late_skipped.append({'row_number': record['row_number'], 'fan': record['fan'], 'model_name': record['model_name'], 'reason': 'SN enregistré depuis la prévisualisation.'})
+                continue
+            existing_fans.add(fan_key)
+            if sn_key:
+                existing_sns.add(sn_key)
+            if record['statut'] in ('Créé', 'Free'):
+                record.update({'disque_dur': 'Oui', 'ram': 'Oui', 'etat_clavier': 'Oui',
+                               'etat_ecran': 'Oui', 'systeme_operateur': 'Oui',
+                               'pave_tactile': 'Oui', 'ports_usb': 'Toutes', 'batterie': 100})
+            insert_rows.append((record['model_slug'], record['model_name'], record['fan'], record.get('sn'),
+                                record['statut'], record.get('username'), record.get('code_user'),
+                                record.get('license_num'), record.get('obs'), record.get('disque_dur'),
+                                record.get('etat_clavier'), record.get('systeme_operateur'),
+                                record.get('etat_ecran'), record.get('batterie'), record.get('ram'),
+                                record.get('ports_usb'), record.get('pave_tactile')))
+        if insert_rows:
+            db.executemany('''INSERT INTO inventory
+                (model_slug, model_name, fan, sn, statut, username, code_user, license_num, obs,
+                 disque_dur, etat_clavier, systeme_operateur, etat_ecran, batterie, ram, ports_usb, pave_tactile)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', insert_rows)
+        db.commit()
+        imported = len(insert_rows)
+    except sqlite3.Error as error:
+        db.rollback()
+        critical_error = f'Import annulé : {error}'
+    finally:
+        try:
+            os.remove(stage_path)
+        except OSError:
+            pass
+
+    skipped = batch['skipped'] + late_skipped
+    errors_count = len(batch['rejected']) + (1 if critical_error else 0)
+    failure_details = critical_error or '; '.join(
+        f"ligne {row['row_number']}: {', '.join(row['errors'])}"
+        for row in batch['rejected'][:10]
+    )
+    _log_excel_import(imported, len(skipped), len(batch['rejected']), errors_count,
+                      batch.get('filename', ''), failure_details)
+    return render_template('excel_import_result.html', imported=imported, skipped=skipped,
+                           rejected=batch['rejected'], critical_error=critical_error,
+                           filename=batch.get('filename', ''), empty_rows=batch.get('empty_rows', 0))
 
 
 @inventory_bp.route('/admin/database/backup')
@@ -88,6 +596,7 @@ COMPONENT_ICONS = {
 }
 
 ACCESSORY_CATEGORIES = {
+    'sim-cards': 'SIM Cards',
     'disque-sauvegarde': 'Disque sauvegarde', 'casques': 'Casques',
     'clavier': 'Clavier', 'souris': 'Souris', 'telephones': 'Téléphones',
 }
@@ -110,6 +619,12 @@ def accessory_page(category):
     category_name = accessory_category_name(category)
     if not category_name:
         return redirect(url_for('inventory.index'))
+    if category == 'sim-cards':
+        rows = get_db().execute('''SELECT a.id, a.brand, a.serial_number, a.technical_details, a.created_at,
+            a.discharge_id, COALESCE(d.recipient_name, d.recipient_code) AS assigned_to
+            FROM accessories a LEFT JOIN discharges d ON d.id = a.discharge_id
+            WHERE a.category = ? ORDER BY a.brand COLLATE NOCASE, a.id''', (category,)).fetchall()
+        return render_template('sim_cards.html', rows=rows, total=len(rows))
     rows = get_db().execute('''SELECT id, brand, accessory_type, serial_number, phone_model, ram, storage,
         technical_details, created_at FROM accessories WHERE category = ? AND discharge_id IS NULL
         ORDER BY brand COLLATE NOCASE, phone_model COLLATE NOCASE, id''', (category,)).fetchall()
@@ -124,12 +639,17 @@ def accessory_add(category):
         return redirect(url_for('inventory.index'))
     brand = request.form.get('brand', '').strip()
     is_phone = category == 'telephones'
+    is_sim = category == 'sim-cards'
     accessory_type = 'Téléphone' if is_phone else request.form.get('accessory_type', '')
     serial_number = request.form.get('serial_number', '').strip() or None
+    if is_sim:
+        accessory_type = 'SIM Card'
     phone_model = request.form.get('phone_model', '').strip() if is_phone else None
     ram = request.form.get('ram', '').strip() if is_phone else None
     storage = request.form.get('storage', '').strip() if is_phone else None
     technical_details = request.form.get('technical_details', '').strip() if is_phone else None
+    if is_sim:
+        technical_details = request.form.get('technical_details', '').strip()
     try:
         quantity = int(request.form.get('quantity', '0'))
     except ValueError:
@@ -138,9 +658,12 @@ def accessory_add(category):
         not phone_model or len(phone_model) > 100 or len(ram) > 60 or len(storage) > 60 or
         len(technical_details) > 500 or (serial_number and quantity != 1)
     )
-    if not brand or len(brand) > 100 or (not is_phone and accessory_type not in {'USB/type-C', 'Bleutooth', 'USB', 'Type-C'}) or invalid_phone or quantity < 1 or quantity > 10000:
+    invalid_sim = is_sim and (not brand or not serial_number or len(serial_number) > 40 or not technical_details or len(technical_details) > 120 or quantity < 1 or quantity > 10000)
+    if not brand or len(brand) > 100 or (not is_phone and not is_sim and accessory_type not in {'USB/type-C', 'Bleutooth', 'USB', 'Type-C'}) or invalid_phone or invalid_sim or (not is_sim and (quantity < 1 or quantity > 10000)):
         if invalid_phone and serial_number and quantity != 1:
             flash('Pour saisir un numéro de série, la quantité doit être égale à 1.', 'error')
+        elif invalid_sim:
+            flash('Renseignez le modèle SIM, le numéro de téléphone et le forfait.', 'error')
         elif invalid_phone:
             flash('Renseignez le modèle du téléphone et vérifiez les limites des champs.', 'error')
         else:
@@ -162,13 +685,25 @@ def accessory_update(category):
     accessory_type = request.form.get('accessory_type', '')
     serial_number = request.form.get('serial_number', '').strip() or None
     is_phone = category == 'telephones'
+    is_sim = category == 'sim-cards'
+    if is_sim:
+        accessory_type = 'SIM Card'
     phone_model = request.form.get('phone_model', '').strip() if is_phone else None
     ram = request.form.get('ram', '').strip() if is_phone else None
     storage = request.form.get('storage', '').strip() if is_phone else None
     technical_details = request.form.get('technical_details', '').strip() if is_phone else None
+    if is_sim:
+        technical_details = request.form.get('technical_details', '').strip()
     invalid_phone = is_phone and (not phone_model or len(phone_model) > 100 or len(ram) > 60 or len(storage) > 60 or len(technical_details) > 500)
-    if not accessory_category_name(category) or not item_id or not brand or len(brand) > 100 or invalid_phone or (not is_phone and accessory_type not in {'USB/type-C', 'Bleutooth', 'USB', 'Type-C'}):
+    invalid_sim = is_sim and (not brand or not serial_number or len(serial_number) > 40 or not technical_details or len(technical_details) > 120)
+    if not accessory_category_name(category) or not item_id or not brand or len(brand) > 100 or invalid_phone or invalid_sim or (not is_phone and not is_sim and accessory_type not in {'USB/type-C', 'Bleutooth', 'USB', 'Type-C'}):
         flash('Marque invalide.', 'error')
+    elif is_sim:
+        get_db().execute('''UPDATE accessories SET brand = ?, accessory_type = 'SIM Card', serial_number = ?, technical_details = ?
+            WHERE id = ? AND category = ? AND discharge_id IS NULL''',
+            (brand, serial_number, technical_details, item_id, category))
+        get_db().commit()
+        flash('SIM Card updated.', 'success')
     elif is_phone:
         get_db().execute('''UPDATE accessories SET brand = ?, accessory_type = 'Téléphone', serial_number = ?,
             phone_model = ?, ram = ?, storage = ?, technical_details = ?
@@ -200,9 +735,10 @@ def discharge_index():
         COALESCE(d.recipient_name, i.username) AS display_user,
         COALESCE(d.recipient_code, i.code_user) AS display_code,
         i.id AS computer_id, i.fan,
-        GROUP_CONCAT(CASE WHEN di.category = 'telephones' THEN 'Téléphone' ELSE di.category END || ': ' || di.brand || CASE WHEN di.phone_model IS NOT NULL THEN ' ' || di.phone_model ELSE '' END || CASE WHEN di.category = 'telephones' AND di.serial_number IS NOT NULL THEN ' · SN ' || di.serial_number ELSE '' END, ', ') AS taken_items
+        GROUP_CONCAT(CASE WHEN di.category = 'sim-cards' THEN 'SIM Cards' WHEN di.category = 'telephones' THEN 'Téléphone' ELSE di.category END || ': ' || di.brand || CASE WHEN di.phone_model IS NOT NULL THEN ' ' || di.phone_model ELSE '' END || CASE WHEN di.category = 'sim-cards' THEN ' - ' || COALESCE(di.serial_number, '') || ' - ' || COALESCE(di.technical_details, '') ELSE '' END || CASE WHEN di.category = 'telephones' AND di.serial_number IS NOT NULL THEN ' · SN ' || di.serial_number ELSE '' END, ', ') AS taken_items
         FROM discharges d JOIN inventory i ON i.id=d.computer_id
-        JOIN discharge_items di ON di.discharge_id=d.id AND di.returned_at IS NULL
+        LEFT JOIN discharge_items di ON di.discharge_id=d.id AND di.returned_at IS NULL
+        WHERE di.id IS NOT NULL OR (d.document_type = 'computer' AND i.statut IN ('Affecter', 'Utilisation hors domaine'))
         GROUP BY d.id ORDER BY d.id DESC""").fetchall()
     employees = db.execute("""SELECT id, model_name, fan, username, code_user FROM inventory
         WHERE statut IN ('Affecter', 'Utilisation hors domaine') AND
@@ -219,7 +755,7 @@ def restitution_index():
         COALESCE(r.recipient_code, i.code_user,
             (SELECT d.recipient_code FROM discharges d WHERE d.computer_id=r.computer_id ORDER BY d.id DESC LIMIT 1)) AS display_code,
         r.computer_returned, i.fan,
-        GROUP_CONCAT(CASE WHEN ri.category = 'telephones' THEN 'Téléphone' ELSE ri.category END || ': ' || ri.brand || CASE WHEN ri.phone_model IS NOT NULL THEN ' ' || ri.phone_model ELSE '' END, ', ') AS returned_items
+        GROUP_CONCAT(CASE WHEN ri.category = 'sim-cards' THEN 'SIM Cards' WHEN ri.category = 'telephones' THEN 'Téléphone' ELSE ri.category END || ': ' || ri.brand || CASE WHEN ri.phone_model IS NOT NULL THEN ' ' || ri.phone_model ELSE '' END || CASE WHEN ri.category = 'sim-cards' THEN ' - ' || COALESCE(ri.serial_number, '') || ' - ' || COALESCE(ri.technical_details, '') ELSE '' END, ', ') AS returned_items
         FROM restitutions r JOIN inventory i ON i.id=r.computer_id
         LEFT JOIN restitution_items ri ON ri.restitution_id=r.id
         GROUP BY r.id ORDER BY r.id DESC""").fetchall()
@@ -234,13 +770,14 @@ def discharge_document(item_id):
         flash('Cette fiche de décharge est disponible pour les ordinateurs affectés ou hors domaine.', 'error')
         return redirect(url_for('inventory.discharge_index'))
     categories = {
+        'sim-cards': 'SIM Cards',
         'casques': 'Casque', 'souris': 'Souris', 'clavier': 'Clavier',
         'disque-sauvegarde': 'Disque de sauvegarde', 'telephones': 'Téléphone',
     }
     accessories = {}
     for slug, label in categories.items():
-        if slug == 'telephones':
-            accessories[slug] = get_db().execute('''SELECT id, brand, phone_model, ram, storage, serial_number,
+        if slug in {'telephones', 'sim-cards'}:
+            accessories[slug] = get_db().execute('''SELECT id, brand, phone_model, ram, storage, serial_number, technical_details,
                 CASE WHEN discharge_id IS NULL THEN 1 ELSE 0 END AS available_quantity
                 FROM accessories WHERE category = ? ORDER BY brand COLLATE NOCASE, phone_model COLLATE NOCASE, id''', (slug,)).fetchall()
         else:
@@ -256,18 +793,16 @@ def discharge_confirm(item_id):
     if not item or item.get('statut') not in {'Affecter', 'Utilisation hors domaine'}:
         flash('Ordinateur non admissible pour une décharge.', 'error')
         return redirect(url_for('inventory.discharge_index'))
-    categories = ['casques', 'souris', 'clavier', 'disque-sauvegarde', 'telephones']
+    categories = ['casques', 'souris', 'clavier', 'disque-sauvegarde', 'telephones', 'sim-cards']
     db = get_db()
     discharge_id = None
     saved = False
     try:
         db.execute('BEGIN IMMEDIATE')
         selected = [(category, request.form.get(f'brand_{category}', '').strip()) for category in categories if request.form.get(f'brand_{category}', '').strip()]
-        if not selected:
-            raise ValueError('Sélectionnez au moins un accessoire avant de valider la décharge.')
         discharge_id = db.execute("INSERT INTO discharges (computer_id, recipient_name, recipient_code, assignment_number, document_type) VALUES (?, ?, ?, ?, 'computer')", (item_id, item.get('username'), item.get('code_user'), item.get('assignment_number', 0))).lastrowid
         for category, value in selected:
-            if category == 'telephones':
+            if category in {'telephones', 'sim-cards'}:
                 phone_id = int(value) if value.isdigit() else 0
                 cursor = db.execute('UPDATE accessories SET discharge_id = ? WHERE id = ? AND category = ? AND discharge_id IS NULL', (discharge_id, phone_id, category))
                 accessory = db.execute('''SELECT id, brand, serial_number, phone_model, ram, storage, technical_details
@@ -289,7 +824,8 @@ def discharge_confirm(item_id):
                  accessory['ram'], accessory['storage'], accessory['technical_details']))
         db.commit()
         saved = True
-        flash('Accessoires attribués et décharge enregistrée.', 'success')
+        flash('Décharge enregistrée avec les accessoires sélectionnés.' if selected else
+              'Décharge enregistrée pour l’ordinateur uniquement.', 'success')
     except ValueError as error:
         db.rollback()
         flash(str(error), 'error')
@@ -310,6 +846,7 @@ def accessory_discharge(item_id):
     stock = get_db().execute('''SELECT id, category, brand, accessory_type, serial_number, phone_model, ram, storage, technical_details FROM accessories
         WHERE discharge_id IS NULL ORDER BY category, brand COLLATE NOCASE, id''').fetchall()
     labels = {'casques': 'Casque', 'souris': 'Souris', 'clavier': 'Clavier', 'disque-sauvegarde': 'Disque de sauvegarde', 'telephones': 'Téléphone'}
+    labels['sim-cards'] = 'SIM Cards'
     return render_template('accessory_discharge.html', item=item, stock=stock, categories=labels, today=date.today().strftime('%d/%m/%Y'))
 
 
@@ -363,8 +900,12 @@ def discharge_record_document(discharge_id):
         return redirect(url_for('inventory.discharge_index'))
     issued = db.execute('SELECT category, brand, serial_number, phone_model, ram, storage, technical_details FROM discharge_items WHERE discharge_id=? ORDER BY id', (discharge_id,)).fetchall()
     categories = {'casques': 'Casque', 'souris': 'Souris', 'clavier': 'Clavier', 'disque-sauvegarde': 'Disque de sauvegarde', 'telephones': 'Téléphone'}
-    return render_template('discharge_record.html', record=record, issued=issued, categories=categories,
+    categories['sim-cards'] = 'SIM Cards'
+    html = render_template('discharge_record.html', record=record, issued=issued, categories=categories,
                            today=date.today().strftime('%d/%m/%Y'))
+    if request.args.get('download') == '1':
+        return _document_download(html, f'decharge-{discharge_id}.html')
+    return html
 
 
 @inventory_bp.route('/restitution/<int:item_id>', methods=['GET', 'POST'])
@@ -426,7 +967,7 @@ def restitution_document(item_id):
         FROM restitution_items WHERE restitution_id = (SELECT id FROM restitutions WHERE computer_id = ? ORDER BY id DESC LIMIT 1) ORDER BY id''', (item_id,)).fetchall()
     previous_recipient = db.execute('SELECT recipient_name FROM discharges WHERE computer_id = ? ORDER BY id DESC LIMIT 1', (item_id,)).fetchone()
     recipient_name = (previous_recipient['recipient_name'] if previous_recipient and previous_recipient['recipient_name'] else None) or item.get('last_recipient') or item.get('username')
-    return render_template('restitution.html', item=item, outstanding=outstanding, returned=returned, recipient_name=recipient_name, today=date.today().strftime('%d/%m/%Y'))
+    return render_template('restitution.html', item=item, outstanding=outstanding, returned=returned, recipient_name=recipient_name, categories=ACCESSORY_CATEGORIES, today=date.today().strftime('%d/%m/%Y'))
 
 
 @inventory_bp.route('/restitution/document/<int:restitution_id>')
@@ -440,13 +981,16 @@ def restitution_record_document(restitution_id):
         return redirect(url_for('inventory.restitution_index'))
     returned = db.execute('''SELECT category, brand, serial_number, phone_model, ram, storage, technical_details FROM restitution_items
         WHERE restitution_id=? ORDER BY id''', (restitution_id,)).fetchall()
-    return render_template('restitution_record.html', record=record, returned=returned,
+    html = render_template('restitution_record.html', record=record, returned=returned, categories=ACCESSORY_CATEGORIES,
                            today=date.today().strftime('%d/%m/%Y'))
+    if request.args.get('download') == '1':
+        return _document_download(html, f'restitution-{restitution_id}.html')
+    return html
 
 
 @inventory_bp.route('/api/ai/inventory-analysis')
 def ai_inventory_analysis():
-    """Summarize issued, returned, and never-issued equipment for employees."""
+    """Summarize assignments, unresolved Helpdesk requests, and low stock."""
     db = get_db()
     equipment = {
         'casques': 'Casque',
@@ -557,6 +1101,32 @@ def ai_inventory_analysis():
             })
 
     results.sort(key=lambda person: person['full_name'].casefold())
+    unresolved_helpdesk = db.execute('''
+        SELECT code_user, description, submitted_at
+        FROM helpdesk_requests
+        WHERE status = 'En attente'
+        ORDER BY submitted_at DESC, id DESC
+    ''').fetchall()
+    low_stock = db.execute('''
+        SELECT category, brand, COALESCE(phone_model, '') AS phone_model,
+            COUNT(*) AS available_quantity
+        FROM accessories
+        WHERE discharge_id IS NULL
+        GROUP BY category, brand COLLATE NOCASE, COALESCE(phone_model, '') COLLATE NOCASE
+        HAVING COUNT(*) < 3
+        ORDER BY category COLLATE NOCASE, brand COLLATE NOCASE, phone_model COLLATE NOCASE
+    ''').fetchall()
+    category_labels = {
+        'casques': 'Casques', 'souris': 'Souris', 'clavier': 'Claviers',
+        'disque-sauvegarde': 'Disques de sauvegarde', 'telephones': 'Téléphones',
+    }
+    low_stock_items = [{
+        'name': ' · '.join(filter(None, [
+            category_labels.get(row['category'], row['category'].replace('-', ' ').replace('_', ' ').title()),
+            row['brand'], row['phone_model'],
+        ])),
+        'quantity': row['available_quantity'],
+    } for row in low_stock]
     return jsonify({
         'employees_scanned': sum(1 for person in people.values() if person['current'] or any(
             count > max(person['returned_counts'].get(slug, 0), person['restitution_counts'].get(slug, 0))
@@ -564,6 +1134,10 @@ def ai_inventory_analysis():
         )),
         'employees_with_missing': len(results),
         'employees': results,
+        'unresolved_helpdesk_count': len(unresolved_helpdesk),
+        'unresolved_helpdesk_requests': [dict(row) for row in unresolved_helpdesk],
+        'low_stock_count': len(low_stock_items),
+        'low_stock_accessories': low_stock_items,
     })
 
 
@@ -584,7 +1158,7 @@ def equipment_dashboard():
         ORDER BY category COLLATE NOCASE
     ''').fetchall()
     category_counts = {row['category']: row['total_count'] for row in categories}
-    known_categories = [
+    known_categories = [{'slug': 'sim-cards', 'name': 'SIM Cards', 'total_count': category_counts.pop('sim-cards', 0)}] + [
         {'slug': slug, 'name': label, 'total_count': category_counts.pop(slug, 0)}
         for slug, label in [
             ('casques', 'Casques'),

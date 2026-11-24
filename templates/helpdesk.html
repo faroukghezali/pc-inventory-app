@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Employee Helpdesk – IT Inventory{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/helpdesk.css') }}">{% endblock %}
+{% block content %}
+<section class="helpdesk-page">
+  <div class="helpdesk-hero">
+    <div><span class="helpdesk-kicker">IT SUPPORT · ALWAYS HERE TO HELP</span><h1>How can we help?</h1><p>Tell our IT team what is happening with your computer. We’ll take it from here.</p></div>
+    <div class="helpdesk-orb" aria-hidden="true"><span>IT</span><i></i><b></b></div>
+  </div>
+  {% if error %}<div class="helpdesk-error" role="alert">{{ error }}</div>{% endif %}
+  {% if submitted %}
+  <section class="helpdesk-card helpdesk-scan-card" id="helpdeskScanner" aria-live="polite">
+    <div class="ai-robot-stage" aria-hidden="true"><div class="ai-orbit ai-orbit-one"></div><div class="ai-orbit ai-orbit-two"></div><div class="ai-robot"><div class="ai-robot-antenna"></div><div class="ai-robot-face"><i></i><i></i><b></b></div><div class="ai-robot-neck"></div><div class="ai-robot-body"><span></span><span></span><span></span></div></div><div class="ai-scan-line"></div></div>
+    <span class="ai-scan-label">REQUEST SECURELY RECEIVED</span>
+    <p class="helpdesk-scan-copy" id="helpdeskScanCopy">Routing your request to the IT Helpdesk team…</p>
+    <div class="ai-progress-track" role="progressbar" aria-label="Request processing progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="helpdeskProgress"><span id="helpdeskProgressBar"></span></div>
+    <div class="ai-progress-meta"><span>PROCESSING REQUEST</span><strong id="helpdeskProgressValue">0%</strong></div>
+    <div class="helpdesk-success hidden" id="helpdeskSuccess" role="status"><span class="helpdesk-success-check">✓</span><div><strong>Request received</strong><p>Your message has been successfully submitted. Our IT Helpdesk team has received your request.</p></div></div>
+    <a class="helpdesk-secondary-link" href="{{ url_for('helpdesk.submit_request') }}">Submit another request</a>
+  </section>
+  {% else %}
+  <form class="helpdesk-card helpdesk-form" method="post" action="{{ url_for('helpdesk.submit_request') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="helpdesk-form-heading"><span class="helpdesk-step">01</span><div><h2>Describe your issue</h2><p>Our support team will review your message as soon as possible.</p></div></div>
+    <label class="helpdesk-label" for="code_user">Code User</label>
+    <input class="form-input helpdesk-input" id="code_user" name="code_user" value="{{ code_user }}" maxlength="80" autocomplete="username" placeholder="Enter your employee code" required>
+    <label class="helpdesk-label" for="description">What’s happening with your computer?</label>
+    <textarea class="form-input helpdesk-textarea" id="description" name="description" maxlength="5000" rows="6" placeholder="Describe the problem, what you were doing, and any message you see…" required>{{ description }}</textarea>
+    <div class="helpdesk-form-foot"><span>Your message is sent directly to the IT Helpdesk.</span><button class="helpdesk-submit" type="submit"><span>Send request</span><b aria-hidden="true">→</b></button></div>
+  </form>
+  {% endif %}
+  <div class="helpdesk-footnote"><span class="helpdesk-secure-icon">⌁</span><span>Your request is handled securely by the company IT team.</span></div>
+</section>
+{% endblock %}
+{% block extra_scripts %}<script src="{{ url_for('static', filename='js/helpdesk.js') }}" defer></script>{% endblock %}

@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}Vérifier l’import Excel{% endblock %}
+{% block content %}
+<section class="excel-import-page">
+    <a class="excel-back-link" href="{{ url_for('inventory.excel_import_page') }}">← Modifier le fichier</a>
+    <div class="excel-import-hero"><div class="excel-hero-copy"><span class="excel-kicker">PRÉVISUALISATION</span><h1>Vérifier les données</h1><p>{{ batch.filename }} · ligne d’en-tête {{ batch.header_row_number }}</p></div><a class="excel-template-button" href="{{ url_for('inventory.excel_import_template') }}">Télécharger le modèle Excel</a></div>
+    <div class="excel-summary-grid">
+        <div class="excel-summary-card is-ready"><span>Prêts à importer</span><strong>{{ batch.to_import|length }}</strong></div>
+        <div class="excel-summary-card is-skipped"><span>Déjà enregistrés</span><strong>{{ batch.skipped|length }}</strong></div>
+        <div class="excel-summary-card is-rejected"><span>À corriger</span><strong>{{ batch.rejected|length }}</strong></div>
+        <div class="excel-summary-card"><span>Lignes vides ignorées</span><strong>{{ batch.empty_rows }}</strong></div>
+    </div>
+    {% if batch.to_import %}<section class="excel-panel excel-review-panel"><h2>Ordinateurs prêts à importer</h2><p>Aucun ordinateur existant ne sera remplacé. Jusqu’à {{ preview_limit }} lignes sont affichées ci-dessous.</p><div class="excel-table-scroll"><table class="excel-review-table"><thead><tr><th>Ligne</th><th>Modèle</th><th>Numéro FAN</th><th>SN</th><th>Statut</th></tr></thead><tbody>{% for row in batch.to_import[:preview_limit] %}<tr><td>{{ row.row_number }}</td><td>{{ row.model_name }}</td><td>{{ row.fan }}</td><td>{{ row.sn or '—' }}</td><td>{{ row.statut }}</td></tr>{% endfor %}</tbody></table></div>{% if batch.to_import|length > preview_limit %}<p class="excel-note">{{ batch.to_import|length - preview_limit }} autres lignes valides seront importées après confirmation.</p>{% endif %}</section>{% endif %}
+    {% if batch.skipped %}<section class="excel-panel excel-review-panel"><h2>Ordinateurs ignorés</h2><div class="excel-table-scroll"><table class="excel-review-table"><thead><tr><th>Ligne</th><th>Modèle</th><th>Numéro FAN</th><th>Motif</th></tr></thead><tbody>{% for row in batch.skipped[:preview_limit] %}<tr><td>{{ row.row_number }}</td><td>{{ row.model_name }}</td><td>{{ row.fan }}</td><td>{{ row.reason }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+    {% if batch.rejected %}<section class="excel-panel excel-review-panel"><h2>Enregistrements à corriger</h2><div class="excel-table-scroll"><table class="excel-review-table"><thead><tr><th>Ligne</th><th>Modèle</th><th>Numéro FAN</th><th>Erreurs</th></tr></thead><tbody>{% for row in batch.rejected[:preview_limit] %}<tr><td>{{ row.row_number }}</td><td>{{ row.model_name or '—' }}</td><td>{{ row.fan or '—' }}</td><td>{{ row.errors|join(', ') }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+    <div class="excel-confirm-row"><a class="excel-secondary-button" href="{{ url_for('inventory.excel_import_page') }}">Annuler</a>{% if batch.to_import %}<form method="post" action="{{ url_for('inventory.excel_import_confirm') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="token" value="{{ token }}"><button class="excel-primary-button" type="submit">Confirmer l’import de {{ batch.to_import|length }} ordinateur(s)</button></form>{% else %}<p>Aucun enregistrement valide à importer.</p>{% endif %}</div>
+</section>
+{% endblock %}

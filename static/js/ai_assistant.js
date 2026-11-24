@@ -29,6 +29,12 @@
     [94, 'Préparation de la synthèse…'],
   ];
 
+  scanPhases.splice(3, 2,
+    [58, 'Vérification des demandes Helpdesk…'],
+    [78, 'Contrôle des stocks accessoires…'],
+    [94, 'Préparation de la synthèse…'],
+  );
+
   function setProgress(value) {
     const progress = Math.min(100, value);
     progressBar.style.width = `${progress}%`;
@@ -94,10 +100,7 @@
         : 'Les collaborateurs actifs et leurs mouvements apparaîtront ici dès leur enregistrement.';
       empty.append(heading, description);
       resultList.appendChild(empty);
-      return;
-    }
-
-    employees.forEach((employee, index) => {
+    } else employees.forEach((employee, index) => {
       const card = document.createElement('article');
       card.className = 'ai-employee-card';
       card.style.animationDelay = `${Math.min(index * 45, 270)}ms`;
@@ -144,6 +147,67 @@
 
       resultList.appendChild(card);
     });
+
+    const unresolved = Array.isArray(data.unresolved_helpdesk_requests) ? data.unresolved_helpdesk_requests : [];
+    const helpdeskCard = document.createElement('section');
+    helpdeskCard.className = 'ai-monitor-card';
+    const helpdeskHeading = document.createElement('div');
+    helpdeskHeading.className = 'ai-monitor-heading';
+    const helpdeskTitle = document.createElement('strong');
+    helpdeskTitle.textContent = `Helpdesk unresolved · ${data.unresolved_helpdesk_count ?? unresolved.length}`;
+    helpdeskHeading.appendChild(helpdeskTitle);
+    helpdeskCard.appendChild(helpdeskHeading);
+    if (!unresolved.length) {
+      const empty = document.createElement('p');
+      empty.className = 'ai-monitor-empty';
+      empty.textContent = 'No unresolved employee requests.';
+      helpdeskCard.appendChild(empty);
+    } else unresolved.forEach(item => {
+      const row = document.createElement('article');
+      row.className = 'ai-monitor-item';
+      const meta = document.createElement('div');
+      meta.className = 'ai-monitor-item-meta';
+      const code = document.createElement('strong');
+      code.textContent = `Code User ${item.code_user || '—'}`;
+      const date = document.createElement('time');
+      date.textContent = item.submitted_at || 'Date unavailable';
+      meta.append(code, date);
+      const description = document.createElement('p');
+      description.textContent = item.description || '';
+      row.append(meta, description);
+      helpdeskCard.appendChild(row);
+    });
+    resultList.appendChild(helpdeskCard);
+
+    const lowStock = Array.isArray(data.low_stock_accessories) ? data.low_stock_accessories : [];
+    const stockCard = document.createElement('section');
+    stockCard.className = 'ai-monitor-card';
+    const stockHeading = document.createElement('div');
+    stockHeading.className = 'ai-monitor-heading';
+    const stockTitle = document.createElement('strong');
+    stockTitle.textContent = `Low accessory stock · ${data.low_stock_count ?? lowStock.length}`;
+    stockHeading.appendChild(stockTitle);
+    stockCard.appendChild(stockHeading);
+    if (!lowStock.length) {
+      const empty = document.createElement('p');
+      empty.className = 'ai-monitor-empty';
+      empty.textContent = 'All accessory categories have at least 3 units available.';
+      stockCard.appendChild(empty);
+    } else {
+      const stockList = document.createElement('ul');
+      stockList.className = 'ai-stock-list';
+      lowStock.forEach(item => {
+        const row = document.createElement('li');
+        const name = document.createElement('span');
+        name.textContent = item.name || 'Accessory';
+        const quantity = document.createElement('strong');
+        quantity.textContent = `${item.quantity} available`;
+        row.append(name, quantity);
+        stockList.appendChild(row);
+      });
+      stockCard.appendChild(stockList);
+    }
+    resultList.appendChild(stockCard);
   }
 
   function showResults(data) {
