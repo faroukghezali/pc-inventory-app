@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from io import BytesIO
 from functools import wraps
 
-from flask import (Blueprint, abort, flash, g, redirect, render_template,
-                   request, send_file, url_for)
+from flask import (Blueprint, abort, flash, g, jsonify, redirect, render_template,
+                   request, send_file, session, url_for)
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
@@ -25,25 +25,35 @@ def admin_required(view):
 @helpdesk_bp.route('/helpdesk', methods=['GET', 'POST'])
 def submit_request():
     error = None
-    submitted_id = request.args.get('submitted', type=int)
-    submitted = bool(submitted_id and get_db().execute(
-        'SELECT id FROM helpdesk_requests WHERE id = ?', (submitted_id,),
-    ).fetchone())
+    submitted = session.pop('helpdesk_submitted', False)
+    if request.method == 'GET':
+        # Public helpdesk visits must not carry an authenticated inventory session
+        # into the browser's Back/Forward history.
+        session.pop('user_id', None)
+        session['public_helpdesk_mode'] = True
+        g.current_user = None
     if request.method == 'POST':
+        submitted = False
         code_user = request.form.get('code_user', '').strip()
         description = request.form.get('description', '').strip()
         if not code_user or len(code_user) > 80:
-            error = 'Enter a valid Code User (up to 80 characters).'
+            error = 'Saisissez un Code User valide (80 caractères maximum).'
         elif not description or len(description) > 5000:
-            error = 'Describe the issue in up to 5,000 characters.'
-        else:
+            error = 'Décrivez votre problème (5 000 caractères maximum).'
+        if error and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify(ok=False, error=error), 422
+        if not error:
             db = get_db()
-            cursor = db.execute(
+            db.execute(
                 'INSERT INTO helpdesk_requests (code_user, description) VALUES (?, ?)',
                 (code_user, description),
             )
             db.commit()
-            return redirect(url_for('helpdesk.submit_request', submitted=cursor.lastrowid))
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                session['helpdesk_submitted'] = True
+                return jsonify(ok=True)
+            session['helpdesk_submitted'] = True
+            return redirect(url_for('helpdesk.submit_request'))
     return render_template(
         'helpdesk.html', submitted=submitted, error=error,
         code_user=request.form.get('code_user', ''), description=request.form.get('description', ''),

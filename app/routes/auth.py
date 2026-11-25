@@ -96,6 +96,8 @@ def install_request_security(app):
             return None
         if not user:
             session.pop('user_id', None)
+            if session.get('public_helpdesk_mode'):
+                return redirect(url_for('helpdesk.submit_request'))
             return redirect(url_for('auth.login', next=request.full_path))
         g.current_user = {
             'id': user['id'], 'username': user['username'],
@@ -150,6 +152,11 @@ def install_request_security(app):
                     activity_file.write(record)
         except OSError:
             current_app.logger.exception('Unable to append to activity log')
+        # Do not let browsers restore authenticated inventory pages from cache
+        # after a visitor has entered the public Helpdesk page.
+        response.headers['Cache-Control'] = 'no-store, private, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
         return response
 
     # Apply retention on startup as well as periodically during normal traffic.
