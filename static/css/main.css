@@ -1124,6 +1124,7 @@ main {
 @media (max-width: 800px) { .discharge-layout { grid-template-columns:1fr; } .discharge-paper { padding:1.3rem; } }
 @media print {
   body { background:#fff !important; }
+  .discharge-page .alert { display:none !important; }
   .navbar, .discharge-controls, .discharge-page > .accessory-heading, .discharge-page > .btn-back, .discharge-top-actions { max-width:none !important; }
   .navbar, .discharge-controls, .discharge-page > .accessory-heading, .discharge-page > .btn-back { display:none !important; }
   main { padding:0 !important; margin:0 !important; }

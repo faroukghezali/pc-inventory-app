@@ -6,6 +6,8 @@ from flask import (
     Blueprint, render_template, redirect, url_for, request, flash, jsonify
 )
 from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile
+from xml.sax.saxutils import escape
 import json
 import os
 import re
@@ -362,6 +364,73 @@ def _document_download(html, filename):
     )
     return send_file(BytesIO(standalone_html.encode('utf-8')), mimetype='text/html',
                      as_attachment=True, download_name=filename)
+
+
+def _decharge_docx(record, issued, categories, today):
+    """Build an editable Word document with the same sections as the web Décharge."""
+    def paragraph(text='', *, style=None, align=None, bold=False, size=None, after=160):
+        ppr = []
+        if style:
+            ppr.append(f'<w:pStyle w:val="{style}"/>')
+        if align:
+            ppr.append(f'<w:jc w:val="{align}"/>')
+        ppr.append(f'<w:spacing w:after="{after}"/>')
+        runprops = []
+        if bold:
+            runprops.append('<w:b/>')
+        if size:
+            runprops.append(f'<w:sz w:val="{size}"/>')
+        return (f'<w:p><w:pPr>{"".join(ppr)}</w:pPr><w:r><w:rPr>{"".join(runprops)}</w:rPr>'
+                f'<w:t xml:space="preserve">{escape(str(text or ""))}</w:t></w:r></w:p>')
+
+    name = record['recipient_name'] or record['recipient_code'] or '________________________________'
+    parts = [
+        paragraph(f'Alger le : {today}', align='right', after=500),
+        paragraph('STELLANTIS EL DJAZAIR', align='center', bold=True, size=28, after=180),
+        paragraph('DIRECTION ADMINISTRATIVE ET FINANCES', align='center', size=22, after=180),
+        paragraph('DEPARTEMENT INFORMATIQUE', align='center', size=22, after=700),
+        paragraph('Décharge', align='center', bold=True, size=32, after=420),
+        paragraph(f'Je soussigné(e) Mr (Mme) : {name}, atteste par la présente avoir reçu de la part de STELLANTIS EL DJAZAIR (Département IT) :', after=300),
+    ]
+    if record['document_type'] == 'computer':
+        laptop = f"Un laptop {record['model_name']}"
+        if record['sn']:
+            laptop += f" dont le numéro de série est : {record['sn']}"
+        parts.append(paragraph(f'•  {laptop}', after=180))
+    for accessory in issued:
+        if accessory['category'] == 'sim-cards':
+            description = f"SIM Card {accessory['brand']} - Phone number {accessory['serial_number'] or ''} - Plan {accessory['technical_details'] or ''}"
+        else:
+            description = f"{categories.get(accessory['category'], accessory['category'])} {accessory['brand']}"
+            if accessory['phone_model']:
+                description += f" {accessory['phone_model']}"
+            if accessory['serial_number']:
+                description += f" · SN {accessory['serial_number']}"
+        parts.append(paragraph(f'•  {description}', after=180))
+    if not issued and record['document_type'] != 'computer':
+        parts.append(paragraph('•  Aucun accessoire', after=180))
+    parts.extend([paragraph('', after=900), paragraph('Signature du bénéficiaire', align='right', after=0)])
+
+    document_xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:body>' + ''.join(parts) +
+        '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>'
+        '</w:body></w:document>')
+    content_types = ('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        '</Types>')
+    rels = ('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
+        '</Relationships>')
+    output = BytesIO()
+    with ZipFile(output, 'w', ZIP_DEFLATED) as docx:
+        docx.writestr('[Content_Types].xml', content_types)
+        docx.writestr('_rels/.rels', rels)
+        docx.writestr('word/document.xml', document_xml)
+    output.seek(0)
+    return output
 
 
 @inventory_bp.route('/import/excel')
@@ -734,7 +803,7 @@ def discharge_index():
     records = db.execute("""SELECT d.id AS discharge_id, d.document_type, d.issued_at,
         COALESCE(d.recipient_name, i.username) AS display_user,
         COALESCE(d.recipient_code, i.code_user) AS display_code,
-        i.id AS computer_id, i.fan,
+        i.id AS computer_id, i.fan, i.model_name,
         GROUP_CONCAT(CASE WHEN di.category = 'sim-cards' THEN 'SIM Cards' WHEN di.category = 'telephones' THEN 'Téléphone' ELSE di.category END || ': ' || di.brand || CASE WHEN di.phone_model IS NOT NULL THEN ' ' || di.phone_model ELSE '' END || CASE WHEN di.category = 'sim-cards' THEN ' - ' || COALESCE(di.serial_number, '') || ' - ' || COALESCE(di.technical_details, '') ELSE '' END || CASE WHEN di.category = 'telephones' AND di.serial_number IS NOT NULL THEN ' · SN ' || di.serial_number ELSE '' END, ', ') AS taken_items
         FROM discharges d JOIN inventory i ON i.id=d.computer_id
         LEFT JOIN discharge_items di ON di.discharge_id=d.id AND di.returned_at IS NULL
@@ -824,8 +893,6 @@ def discharge_confirm(item_id):
                  accessory['ram'], accessory['storage'], accessory['technical_details']))
         db.commit()
         saved = True
-        flash('Décharge enregistrée avec les accessoires sélectionnés.' if selected else
-              'Décharge enregistrée pour l’ordinateur uniquement.', 'success')
     except ValueError as error:
         db.rollback()
         flash(str(error), 'error')
@@ -904,7 +971,10 @@ def discharge_record_document(discharge_id):
     html = render_template('discharge_record.html', record=record, issued=issued, categories=categories,
                            today=date.today().strftime('%d/%m/%Y'))
     if request.args.get('download') == '1':
-        return _document_download(html, f'decharge-{discharge_id}.html')
+        output = _decharge_docx(record, issued, categories, date.today().strftime('%d/%m/%Y'))
+        return send_file(output,
+                         mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                         as_attachment=True, download_name=f'decharge-{discharge_id}.docx')
     return html
 
 
@@ -1438,6 +1508,9 @@ def add_item():
             etat_ecran, batterie, ram, ports_usb,
             pave_tactile=pave_tactile,
         )
+        if statut == 'Affecter':
+            item_id = get_db().execute('SELECT last_insert_rowid()').fetchone()[0]
+            return redirect(url_for('inventory.discharge_document', item_id=item_id))
         return redirect(url_for('inventory.model_detail', slug=slug))
 
     return render_template('add_item.html', form_data={})
